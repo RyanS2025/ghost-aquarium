@@ -93,7 +93,7 @@
       <legend>View</legend>
       <label class="check"><input type="checkbox" id="pixel"> Pixel-accurate (exact 320×240 grid)</label>
       <label class="check"><input type="checkbox" id="mirror"> Mirror (how it looks on the reflector)</label>
-      <label class="check"><input type="checkbox" id="ascii"> Classic ASCII fish</label>
+      <label class="check"><input type="checkbox" id="drawn"> Drawn fish &amp; rocks instead of ASCII (experiment)</label>
       <div class="btns">
         <button id="leap">Make a fish leap</button>
         <button id="reseed">Reseed</button>
@@ -136,7 +136,7 @@ const FONT_PX = [8, 10, 13];
 const ADV = FONT_PX.map((p) => p * 0.62);     // monospace character advance
 const BODY_SPACE = [0.7, 1.0, 1.35];          // separation scales with body size per layer
 const MAX_PARTICLES = 320, MAX_RIPPLES = 24, BUBBLE_CAP = 64;
-const SEAWEED_COUNT = 5, SEAWEED_SEG_PX = 7, PLANKTON = 44;
+const SEAWEED_COUNT = 4, SEAWEED_SEG_PX = 7, PLANKTON = 44;
 const TAU = Math.PI * 2;
 const HOME_MIN = SURFACE_Y + 32, HOME_MAX = H - 48;   // fish stay above the reef
 
@@ -217,7 +217,7 @@ const FISH_SHAPE = [            // per depth layer: body length, half-height, ta
 ];
 const LOOKS = ["tetra", "betta", "goldfish", "clown", "spots", "stripes", "tang"];   // per palette index
 const ROCK_TONES = ["scene", "#4d6b86", "#7a4b3a"];   // scene rock color, blue-grey, warm red-brown
-let asciiStyle = false;
+let asciiStyle = true;                                // the project's look; drawn style is an experiment
 const fishLen = (L) => (asciiStyle ? SPECIES[L].right.length * ADV[L] : FISH_SHAPE[L].L + FISH_SHAPE[L].T);
 
 // ================================================================ state
@@ -289,31 +289,35 @@ function makeTank(s) {
       });
     }
   }
-  const seaweed = [];
-  for (let i = 0; i < SEAWEED_COUNT; i++) {
-    seaweed.push({ x: W * (0.12 + 0.76 * i / (SEAWEED_COUNT - 1)) + rng.uniform(-10, 10), height: rng.uniform(50, 105), phase: rng.uniform(0, TAU), tint: rng.uniform(0, 1) });
+  // Seabed layout: rocks, seaweed and coral never overlap (overlapping ASCII pieces read as a
+  // jumble of punctuation). Shuffle the pieces, then pack them left→right with even gaps:
+  // overlap is impossible by construction, and the arrangement still differs per seed.
+  const bed = [];
+  for (const [w0, h0] of [[60, 28], [40, 20], [24, 12], [14, 7]]) {
+    const w = w0 * rng.uniform(0.85, 1.15), h = h0 * rng.uniform(0.85, 1.2);
+    bed.push({ kind: "rock", half: w / 2, w, h });
   }
+  for (let i = 0; i < SEAWEED_COUNT; i++) bed.push({ kind: "weed", half: 4 });
+  for (let i = 0; i < 3; i++) bed.push({ kind: "coral", half: 12.5 });
+  for (let i = bed.length - 1; i > 0; i--) { const j = rng.int(i + 1); [bed[i], bed[j]] = [bed[j], bed[i]]; }
+  const used = bed.reduce((a, b) => a + 2 * b.half, 0);
+  const gap = Math.max(0, (W - 4 - used) / (bed.length + 1));
+  let cursor = 2 + gap;
+  const rocks = [], seaweed = [], reef = [];
+  for (const b of bed) {
+    const x = cursor + b.half + rng.uniform(-0.35, 0.35) * gap;
+    cursor += 2 * b.half + gap;
+    if (b.kind === "rock") rocks.push(makeRock(rng, x, b.w, b.h));
+    else if (b.kind === "weed") seaweed.push({ x, height: rng.uniform(50, 105), phase: rng.uniform(0, TAU), tint: rng.uniform(0, 1) });
+    else { const tpl = CORAL[rng.int(CORAL.length)]; reef.push({ x, rows: tpl.rows, flex: tpl.flex, glow: !!tpl.glow, color: REEF_COLORS[rng.int(REEF_COLORS.length)], phase: rng.uniform(0, TAU) }); }
+  }
+  rocks.sort((a, b) => b.h - a.h);             // big ones first
+  rocks[0].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
+  if (rng.uniform(0, 1) < 0.6) rocks[1].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
   const plankton = [];
   for (let i = 0; i < PLANKTON; i++) {
     plankton.push({ pos: v(rng.uniform(0, W), rng.uniform(SURFACE_Y, H)), vel: v(rng.uniform(-3, 3), rng.uniform(-2, 2)), phase: rng.uniform(0, TAU), color: rng.uniform(0, 1) < 0.5 ? "#4fe9ff" : REEF_COLORS[rng.int(REEF_COLORS.length)] });
   }
-  // reef: corals between the seaweed, rocks, sand
-  const reef = [];
-  for (let i = 0; i < 7; i++) {
-    const tpl = CORAL[rng.int(CORAL.length)];
-    reef.push({ x: W * (0.05 + 0.9 * i / 6) + rng.uniform(-9, 9), rows: tpl.rows, flex: tpl.flex, glow: !!tpl.glow, color: REEF_COLORS[rng.int(REEF_COLORS.length)], phase: rng.uniform(0, TAU) });
-  }
-  // rocks: a few big boulders and some smaller stones, spread so they don't stack
-  const rocks = [];
-  for (const [w0, h0] of [[64, 30], [46, 24], [34, 17], [26, 13], [18, 9], [14, 7]]) {
-    const w = w0 * rng.uniform(0.85, 1.15), h = h0 * rng.uniform(0.85, 1.2);
-    let x = 0;
-    for (let k = 0; k < 12; k++) { x = rng.uniform(w / 2 + 2, W - w / 2 - 2); if (rocks.every((r) => Math.abs(r.x - x) > (r.w + w) * 0.42)) break; }
-    rocks.push(makeRock(rng, x, w, h));
-  }
-  rocks[0].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
-  if (rng.uniform(0, 1) < 0.6) rocks[1].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
-  rocks.sort((a, b) => b.h - a.h);             // big ones at the back
   const sand = [];
   for (let x = 2; x < W; x += 4) sand.push({ x: x + rng.uniform(-1, 1), y: H - 2 - rng.uniform(0, 3), ch: [",", ".", "`", "."][rng.int(4)], pebble: rng.uniform(0, 1) < 0.08 ? REEF_COLORS[rng.int(REEF_COLORS.length)] : null });
   const rays = [];
@@ -331,7 +335,32 @@ function makeRock(rng, x, w, h) {
   const moss = [], specks = [];
   for (let k = 2; k < n - 1; k++) if (pts[k].y < -h * 0.6 && rng.uniform(0, 1) < 0.4) moss.push({ x: pts[k].x, y: pts[k].y + 1.2, r: rng.uniform(1.5, 3) });
   for (let k = 0; k < 6; k++) specks.push({ x: rng.uniform(-w * 0.3, w * 0.3), y: rng.uniform(-h * 0.65, -h * 0.12), r: rng.uniform(0.4, 0.9) });
-  return { x, w, h, pts, moss, specks, star: null, tone: ROCK_TONES[rng.int(ROCK_TONES.length)], lMul: rng.uniform(0.85, 1.2), hueShift: rng.uniform(-12, 12), starRot: rng.uniform(0, TAU) };
+
+  // ASCII version: a character grid filling the outline. Top-edge characters follow the
+  // slope (/ rising, \ falling, - flat), the sides close with ( ), the inside is a dense
+  // stone texture, and some flat top cells grow moss.
+  const CW = 4.6, CHH = 6.2, cells = [];
+  const topAt = (x) => {
+    for (let k = 0; k < pts.length - 1; k++) {
+      const a = pts[k], b = pts[k + 1];
+      if (a.x !== b.x && (x - a.x) * (x - b.x) <= 0) return a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
+    }
+    return 0;
+  };
+  for (let cx = -w / 2 + CW / 2; cx < w / 2; cx += CW) {
+    const slope = (topAt(cx + 1.5) - topAt(cx - 1.5)) / 3;
+    const rows = Math.max(1, Math.round(-topAt(cx) / CHH));
+    for (let r = 0; r < rows; r++) {
+      const top = r === rows - 1, edgeL = cx < -w / 2 + CW, edgeR = cx > w / 2 - CW;
+      let ch;
+      if (top) ch = slope < -0.45 ? "/" : slope > 0.45 ? "\\" : "-";
+      else if (edgeL) ch = "(";
+      else if (edgeR) ch = ")";
+      else { const q = rng.uniform(0, 1); ch = q < 0.7 ? "#" : q < 0.88 ? "%" : ":"; }   // calm, mostly-solid stone
+      cells.push({ x: cx, y: -CHH * (r + 0.5), ch, top, moss: top && Math.abs(slope) < 0.6 && rng.uniform(0, 1) < 0.35 });
+    }
+  }
+  return { x, w, h, pts, moss, specks, cells, star: null, tone: ROCK_TONES[rng.int(ROCK_TONES.length)], lMul: rng.uniform(0.85, 1.2), hueShift: rng.uniform(-12, 12), starRot: rng.uniform(0, TAU) };
 }
 
 // Body sample points used for spacing between fish (matches the drawn length).
@@ -796,7 +825,31 @@ function drawStar(x, y, R, color, rot) {
 
 // Boulders: lit from the surface (upper-left highlight), dark at the base, with speckles,
 // moss on top and the odd starfish.
+function drawAsciiRocks(tk) {
+  const baseY = H - 3, [mh, ms, ml] = sceneHsl.seaweedTip;
+  ctx.font = "bold 8px monospace";
+  for (const r of tk.rocks) {
+    const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
+    const h = (h0 + r.hueShift + 360) % 360, s = s0 * T.vibrance * 0.85, l = l0 * r.lMul;
+    let peak = r.cells[0];
+    for (const c of r.cells) {
+      if (c.y < peak.y) peak = c;
+      const u = c.x / r.w + 0.5, up = -c.y / r.h;                  // 0..1 left→right, base→top
+      const light = 0.45 + 0.75 * up + 0.3 * (0.5 - u);            // lit from above-left
+      ctx.fillStyle = c.moss ? hsl(mh, ms * T.vibrance * 0.8, ml * 0.6) : hsl(h, s, l * light * (c.top ? 1.25 : 1));
+      ctx.fillText(c.moss ? '"' : c.ch, P(r.x + c.x), P(baseY + c.y));
+    }
+    if (r.star) {
+      const [sh, ss, sl] = hslOf(r.star);
+      ctx.font = "bold 12px monospace"; ctx.fillStyle = hsl(sh, ss * T.vibrance, sl);
+      ctx.fillText("*", P(r.x + peak.x), P(baseY + peak.y - 5));
+      ctx.font = "bold 8px monospace";
+    }
+  }
+}
+
 function drawRocks(tk) {
+  if (asciiStyle) return drawAsciiRocks(tk);
   const baseY = H - 3;
   for (const r of tk.rocks) {
     const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
@@ -1130,7 +1183,7 @@ buildControls(); refreshExport();
 
 $("pixel").addEventListener("change", (e) => setResolution(e.target.checked));
 $("mirror").addEventListener("change", (e) => canvas.classList.toggle("mirror", e.target.checked));
-$("ascii").addEventListener("change", (e) => { asciiStyle = e.target.checked; for (const f of tank.fish) f.body = bodyPoints(f); });
+$("drawn").addEventListener("change", (e) => { asciiStyle = !e.target.checked; for (const f of tank.fish) f.body = bodyPoints(f); });
 $("leap").addEventListener("click", () => tryAutoLeap(tank));
 $("reseed").addEventListener("click", () => { seed = (Math.random() * 0xFFFFFFFF) >>> 0; tank = makeTank(seed); refreshExport(); save(); });
 $("reset").addEventListener("click", () => {
