@@ -27,11 +27,11 @@ test: ## Run every laptop test (includes your schooling task)
 test-ready: ## Run every laptop test except the schooling task (Task 4)
 	$(PIO) test -e native -i test_school
 
-build: ## Build the firmware (mirrored, for the real reflector)
+build: ## Build the device firmware (SSD1351 OLED, mirrored for the reflector)
 	$(PIO) run -e esp32s3
 
-build-sim: ## Build the firmware un-mirrored (readable in the simulator)
-	PLATFORMIO_BUILD_FLAGS="-DGHOST_MIRROR=0" $(PIO) run -e esp32s3
+build-sim: ## Build the simulator firmware: ILI9341 panel, un-mirrored, 128×128 tank centred
+	PLATFORMIO_BUILD_FLAGS="-DGHOST_MIRROR=0 -DGHOST_PANEL_SIM=1" $(PIO) run -e esp32s3
 
 sim: build-sim ## Boot the firmware in Wokwi headlessly: checks for an fps= line, saves log + screenshot
 	@test -x "$(WOKWI)" || { echo "wokwi-cli missing: run 'make setup' for instructions"; exit 1; }
@@ -57,7 +57,7 @@ gif: ## Render the README demo GIF with the firmware's renderer → docs/media/d
 	@rm -rf $(OUT)/frames && mkdir -p $(OUT)/frames
 	GHOST_FRAMES=$(CURDIR)/$(OUT)/frames $(PIO) test -e native -f test_render
 	ffmpeg -loglevel error -y -framerate 20 -i $(OUT)/frames/frame_%03d.ppm \
-	  -vf "scale=640:480:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
+	  -vf "scale=512:512:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
 	  -loop 0 docs/media/demo.gif
 	@ls -lh docs/media/demo.gif
 
