@@ -57,3 +57,16 @@ The look was designed in a browser that can do things the device can't: anti-ali
 - The renderer has a JS reference implementation to port and check the C++ against. The C++ RNG draw order differs from the JS (some JS draws only feed the drawn-fish experiment), so the same seed builds a different world. The comparison is visual: a C++ snapshot (`GHOST_SNAPSHOT`) against the device preview.
 - The pool caps are enforced in `tanksim`. Exceeding one drops the new item (it's never an error).
 - Phase 1 must record real numbers: render ms, push ms, fps, and free SRAM/PSRAM. These go into DESIGN §8 and confirm or replace the estimates above.
+
+## Phase 0 measurements (Wokwi, 2026-11-14)
+
+Per-stage times from the firmware's `stages_us` log line, in Wokwi time. The simulator runs slower than real silicon, so it's calibrated against the push: 153,600 bytes at 40 MHz SPI is ≈31 ms on hardware, and Wokwi reported 149 ms, a factor of ≈4.8. Real-hardware numbers are estimates until Phase 1.
+
+| Change | Render (Wokwi) | Biggest stage after it |
+|---|---|---|
+| First firmware | 178 ms | rays 83.5 ms (47%) |
+| Rocks and sand baked into the background once; rays in a PSRAM backdrop, one of 8 bands refreshed per frame | 92 ms | ambient 24 ms |
+| `fmod` → `floor` wrap in the color math; `pow(u, 1.5)` → `u·√u` | 86 ms | ambient 24 ms |
+| Water surface in one pass (angle-addition recurrence, per-ripple constants, 120 px ripple reach) and an integer glint hash | **70 ms** | fish 17.5 ms |
+
+With the ≈4.8× calibration that's about 15 ms render + 31 ms push, so **≈22 fps** while rendering and pushing run one after the other. The push is now twice the render time, so the next step toward 30 fps is overlapping them (§7: DMA with banding or a second buffer), not more CPU work. Confirm on hardware first.

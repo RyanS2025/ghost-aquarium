@@ -52,8 +52,26 @@ void test_ripples_drop_oldest_when_full() {
   TEST_ASSERT_EQUAL_FLOAT(1.f, r.items[0].x);  // ripple 0 was dropped
 }
 
+// The renderer computes the whole surface in one pass (recurrences, per-ripple constants);
+// it must match surfaceAt point for point.
+void test_surface_profile_matches_surface_at() {
+  tank::RipplePool r;
+  tank::addRipple(r, 100.f, 3.f);
+  tank::addRipple(r, 230.f, 2.f);
+  tank::addRipple(r, 40.f, 1.f);
+  r.items[0].age = 1.2f;
+  r.items[1].age = 0.4f;
+  r.items[2].age = 3.1f;
+  constexpr int n = 54;
+  float ys[n];
+  const float t = 1234.567f;
+  tank::surfaceProfile(r, t, 3.f, 6.f, n, ys);
+  for (int k = 0; k < n; ++k) TEST_ASSERT_FLOAT_WITHIN(2e-3f, tank::surfaceAt(r, 3.f + 6.f * k, t), ys[k]);
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_surface_profile_matches_surface_at);
   RUN_TEST(test_pool_add_fails_when_full_and_remove_compacts);
   RUN_TEST(test_seaweed_root_fixed_and_sway_bounded);
   RUN_TEST(test_surface_flat_without_ripples_and_bounded_with);

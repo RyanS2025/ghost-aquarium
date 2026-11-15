@@ -160,8 +160,58 @@ void test_render_refuses_non_full_frames() {
   for (int i = 0; i < W * H; ++i) TEST_ASSERT_EQUAL_HEX16(0xABCD, px[i]);
 }
 
+// Performance path (measured in Wokwi: rays were 47% of render time, rocks + sand 10%):
+// static scenery is baked into the background once, and rays live in a backdrop buffer that is
+// refreshed one band per frame. Above the seabed the result must equal the live render.
+void test_baked_backdrop_matches_live_render_above_seabed() {
+  auto bg = background();
+  tank::Tank tk(kT, kFx, 11);
+  for (int i = 0; i < 240; ++i) tk.step(1.f / 60.f);
+
+  std::vector<uint16_t> live(W * H), baked(W * H), backdrop(W * H);
+  Frame fl{live.data(), W, H};
+  tank::render::renderFrame(tk, bg.data(), fl);
+
+  tank::render::bakeStaticScenery(tk, bg.data());
+  for (int band = 0; band < tank::render::kRayBands; ++band) tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), band);
+  Frame fb{baked.data(), W, H};
+  tank::render::renderFrame(tk, backdrop.data(), fb, tank::render::kBackdropHasRaysAndScenery);
+
+  for (int y = 0; y < 180; ++y)
+    for (int x = 0; x < W; ++x) TEST_ASSERT_EQUAL_HEX16(live[y * W + x], baked[y * W + x]);
+  TEST_ASSERT_TRUE(fb.glyphs < fl.glyphs);  // rocks + sand no longer drawn per frame
+}
+
+void test_refresh_backdrop_touches_only_its_band() {
+  const auto bg = background();
+  tank::Tank tk(kT, kFx, 2);
+  std::vector<uint16_t> backdrop(W * H, 0xBEEF);
+  tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), 3);
+  const int rowsPerBand = H / tank::render::kRayBands;
+  for (int y = 0; y < H; ++y) {
+    const bool inBand = y >= 3 * rowsPerBand && y < 4 * rowsPerBand;
+    if (!inBand) TEST_ASSERT_EQUAL_HEX16(0xBEEF, backdrop[y * W + 10]);
+  }
+  TEST_ASSERT_NOT_EQUAL(0xBEEF, backdrop[(3 * rowsPerBand) * W + 10]);
+}
+
+void test_bake_static_scenery_only_touches_the_seabed() {
+  auto bg = background();
+  const auto before = bg;
+  tank::Tank tk(kT, kFx, 2);
+  tank::render::bakeStaticScenery(tk, bg.data());
+  for (int y = 0; y < 180; ++y)
+    for (int x = 0; x < W; ++x) TEST_ASSERT_EQUAL_HEX16(before[y * W + x], bg[y * W + x]);
+  int changed = 0;
+  for (size_t i = 0; i < bg.size(); ++i) changed += bg[i] != before[i];
+  TEST_ASSERT_TRUE(changed > 200);  // rocks and sand were drawn
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_baked_backdrop_matches_live_render_above_seabed);
+  RUN_TEST(test_refresh_backdrop_touches_only_its_band);
+  RUN_TEST(test_bake_static_scenery_only_touches_the_seabed);
   RUN_TEST(test_framebuffer_is_native_rgb565);
   RUN_TEST(test_render_refuses_non_full_frames);
   RUN_TEST(test_glyph_table_covers_every_scene_character);

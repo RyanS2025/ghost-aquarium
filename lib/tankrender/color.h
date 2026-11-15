@@ -27,12 +27,16 @@ inline Hsl rgbToHsl(uint32_t rgb) {
   return {h * 60.f, s, l};
 }
 
+// Wrap degrees into [0, 360) with floor, not fmod: fmodf is a slow library call on the ESP32 and
+// this runs several times per glyph (~7 per fish character before this change).
+inline float wrapDeg(float h) { return h - 360.f * std::floor(h * (1.f / 360.f)); }
+
 inline uint16_t hsl565(float h, float s, float l) {
   s = std::min(1.f, std::max(0.f, s));
   l = std::min(1.f, std::max(0.f, l));
   const float c = (1.f - std::fabs(2.f * l - 1.f)) * s;
-  const float hp = std::fmod(std::fmod(h, 360.f) + 360.f, 360.f) / 60.f;
-  const float x = c * (1.f - std::fabs(std::fmod(hp, 2.f) - 1.f)), m = l - c / 2.f;
+  const float hp = wrapDeg(h) / 60.f;
+  const float x = c * (1.f - std::fabs(hp - 2.f * std::floor(hp * 0.5f) - 1.f)), m = l - c / 2.f;
   float r = 0, g = 0, b = 0;
   if (hp < 1) { r = c; g = x; } else if (hp < 2) { r = x; g = c; } else if (hp < 3) { g = c; b = x; }
   else if (hp < 4) { g = x; b = c; } else if (hp < 5) { r = x; b = c; } else { r = c; b = x; }
@@ -41,8 +45,8 @@ inline uint16_t hsl565(float h, float s, float l) {
 
 // Shortest-way hue interpolation.
 inline float lerpHue(float a, float b, float t) {
-  const float d = std::fmod(b - a + 540.f, 360.f) - 180.f;
-  return std::fmod(a + d * t + 360.f, 360.f);
+  const float d = wrapDeg(b - a + 180.f) - 180.f;
+  return wrapDeg(a + d * t);
 }
 
 }  // namespace tank::render

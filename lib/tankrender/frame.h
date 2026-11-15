@@ -15,6 +15,12 @@ struct Frame {
   uint32_t glyphs = 0;  // stats for the budget (ADR 0008)
   uint32_t writes = 0;
 
+  // Optional per-stage timing: the firmware passes a µs clock (micros); null on the laptop.
+  using ClockFn = uint32_t (*)();
+  ClockFn clock = nullptr;
+  enum Stage { kBackground, kRays, kPlankton, kRocks, kSeaweed, kCoral, kSand, kFish, kAmbient, kStageCount };
+  uint32_t stageUs[kStageCount] = {};
+
   // Glyph centred at (cx, cy), nearest-neighbour scaled by s, in a 6×8 cell.
   void blit(char ch, float cx, float cy, float s, uint16_t color) {
     const uint8_t* g = glyphRows(ch);
