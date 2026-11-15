@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="340" color="#14211c" viewBox="0 0 400 340" role="img" aria-label="Top view: the phone lies with its camera end toward the viewer; the hood's back wall sits 5 millimetres beyond the 27 millimetre window, side walls either side, open toward the viewer."><style>
+text{font-family:ui-monospace,Menlo,Consolas,monospace}
+.t{font-size:12px;fill:#14211c}.tm{font-size:12px;fill:#536660}.tg{font-size:12px;fill:#08808c;font-weight:600}
+.g-stroke{stroke:#08808c}.g-fill{fill:#08808c}.g-soft{fill:rgba(8,128,140,.14)}.panel{fill:#e0e7e3}.mask{fill:#1b2420}.muted-stroke{stroke:#536660}
+</style><rect width="400" height="340" fill="#f7faf8"/>
+              <rect x="40" y="30" width="116" height="240" rx="14" class="mask" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="76.5" y="138.5" width="43" height="43" class="g-soft" stroke="#08808c" stroke-width="1.5"/>
+              <text x="98" y="164" class="tg" text-anchor="middle">&gt;&lt;&gt;</text>
+              <line x1="50" y1="130.5" x2="146" y2="130.5" stroke="currentColor" stroke-width="5"/>
+              <line x1="50" y1="130.5" x2="50" y2="210.5" stroke="currentColor" stroke-width="2.5"/>
+              <line x1="146" y1="130.5" x2="146" y2="210.5" stroke="currentColor" stroke-width="2.5"/>
+              <line x1="50" y1="210.5" x2="146" y2="210.5" class="muted-stroke" stroke-width="1" stroke-dasharray="3 4"/>
+              <circle cx="98" cy="258" r="4" class="panel" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="98" y1="320" x2="98" y2="290" stroke="currentColor" stroke-width="1.5" marker-end="url(#ah2)"/>
+              <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+              <text x="108" y="318" class="t">you look from here</text>
+              <line x1="150" y1="126" x2="196" y2="112" class="muted-stroke"/>
+              <text x="200" y="116" class="t">back wall</text>
+              <line x1="124" y1="134" x2="196" y2="138" class="muted-stroke"/>
+              <text x="200" y="142" class="t">5 mm gap</text>
+              <line x1="124" y1="164" x2="196" y2="168" class="muted-stroke"/>
+              <text x="200" y="172" class="tg">27 mm window</text>
+              <line x1="150" y1="196" x2="196" y2="198" class="muted-stroke"/>
+              <text x="200" y="202" class="t">side walls, 60 mm apart</text>
+              <text x="200" y="228" class="tm">front stays open</text>
+              <line x1="104" y1="258" x2="196" y2="258" class="muted-stroke"/>
+              <text x="200" y="262" class="t">camera end toward you</text>
+            </svg>

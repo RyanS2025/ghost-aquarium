@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="290" color="#14211c" viewBox="0 0 640 290" role="img" aria-label="Side view: light rises from the phone's 27 mm window, hits the 45 degree sheet, and travels horizontally to the eye, so the ghost appears standing upright at the back wall."><style>
+text{font-family:ui-monospace,Menlo,Consolas,monospace}
+.t{font-size:12px;fill:#14211c}.tm{font-size:12px;fill:#536660}.tg{font-size:12px;fill:#08808c;font-weight:600}
+.g-stroke{stroke:#08808c}.g-fill{fill:#08808c}.g-soft{fill:rgba(8,128,140,.14)}.panel{fill:#e0e7e3}.mask{fill:#1b2420}.muted-stroke{stroke:#536660}
+</style><rect width="640" height="290" fill="#f7faf8"/>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="g-fill"/>
+          </marker>
+        </defs>
+        <line x1="20" y1="250" x2="620" y2="250" class="muted-stroke" stroke-width="1"/>
+        <rect x="320" y="82" width="150" height="150" class="panel"/>
+        <text x="330" y="226" class="tm">side wall</text>
+        <line x1="320" y1="82" x2="476" y2="82" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="398" y="74" class="tm" text-anchor="middle">roof (optional)</text>
+        <rect x="470" y="82" width="6" height="150" fill="currentColor"/>
+        <text x="488" y="100" class="t">black back wall</text>
+        <rect x="250" y="232" width="290" height="18" rx="4" class="panel" stroke="currentColor" stroke-width="1.5"/>
+        <rect x="252" y="228" width="122" height="4" class="mask"/>
+        <rect x="455" y="228" width="83" height="4" class="mask"/>
+        <rect x="374" y="228" width="81" height="4" class="g-fill"/>
+        <line x1="470" y1="232" x2="320" y2="82" class="g-stroke" stroke-width="3" stroke-linecap="round"/>
+        <line x1="306" y1="94" x2="334" y2="96" class="muted-stroke" stroke-width="1"/>
+        <text x="302" y="98" class="t" text-anchor="end">clear sheet at 45°</text>
+        <line x1="410" y1="226" x2="410" y2="176" class="g-stroke" stroke-width="2" marker-end="url(#ah)"/>
+        <line x1="408" y1="172" x2="100" y2="172" class="g-stroke" stroke-width="2" marker-end="url(#ah)"/>
+        <line x1="412" y1="172" x2="462" y2="172" class="g-stroke" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <rect x="459" y="136" width="7" height="81" class="g-soft" stroke-width="1.5" stroke-dasharray="4 3" stroke="#08808c"/>
+        <text x="488" y="160" class="tg">ghost appears here</text>
+        <text x="488" y="176" class="tm">upright, 27 mm tall</text>
+        <text x="402" y="198" class="tm" text-anchor="end">light rises</text>
+        <text x="250" y="164" class="tm" text-anchor="middle">reflects toward you</text>
+        <ellipse cx="78" cy="172" rx="15" ry="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="84" cy="172" r="4" fill="currentColor"/>
+        <text x="40" y="150" class="t">your eye, level with the sheet</text>
+        <text x="395" y="272" class="tm" text-anchor="middle">phone, face up, under black paper with a 27 mm window</text>
+      </svg>
