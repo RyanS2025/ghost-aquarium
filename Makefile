@@ -7,7 +7,7 @@ OUT := .pio/out
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test test-ready build build-sim sim snapshot gif prototype flash monitor check clean
+.PHONY: help setup test test-ready build build-sim sim snapshot gif cad prototype flash monitor check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -60,6 +60,11 @@ gif: ## Render the README demo GIF with the firmware's renderer → docs/media/d
 	  -vf "scale=640:480:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
 	  -loop 0 docs/media/demo.gif
 	@ls -lh docs/media/demo.gif
+
+CAD_PY := .pio/cad-venv/bin/python
+cad: ## Regenerate the 3D-printable enclosure (hardware/out/*.stl + cross-section preview)
+	@test -x $(CAD_PY) || { python3 -m venv .pio/cad-venv && .pio/cad-venv/bin/pip install -q -r hardware/requirements.txt; }
+	$(CAD_PY) hardware/ghost_base.py
 
 prototype: ## Serve the browser tuner on http://127.0.0.1:8765 and open it (Ctrl+C to stop)
 	@(sleep 1; open http://127.0.0.1:$(PORT)/index.html 2>/dev/null || xdg-open http://127.0.0.1:$(PORT)/index.html) &

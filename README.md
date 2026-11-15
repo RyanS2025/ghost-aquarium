@@ -65,6 +65,7 @@ Every workflow is one command (`make help` lists them). They're also VS Code tas
 | Command | What it does |
 |---|---|
 | `make setup` | Installs PlatformIO and checks the Wokwi simulator setup |
+| `make cad` | Regenerates the 3D-printable enclosure (STLs + cross-sections) from parametric code |
 | `make gif` | Renders the README demo GIF with the firmware renderer |
 | `make check` | Laptop tests, firmware build and a rendered snapshot frame: everything that needs no hardware |
 | `make prototype` | Opens the browser tuner (device-accurate preview, sliders, "Copy as C++") |

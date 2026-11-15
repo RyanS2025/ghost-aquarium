@@ -35,7 +35,7 @@ Goal: a finished desk piece and a 30-second demo video.
 
 **Enclosure**
 - [ ] Makerspace safety orientation and FDM 3D-printing training
-- [ ] Base designed in CAD: screen pocket, 45° reflector slot, cable exit, matte black interior. Files go in `hardware/`.
+- [x] Base designed in CAD: screen window + bosses, 45° reflector grooves, USB-C notch, dark back wall. Parametric code-CAD + STLs in [`hardware/`](../hardware/) (`make cad`). **Re-check the dimensions against your real display before printing**
 - [ ] Base printed and assembled
 - [ ] Optional: reflector laser-cut from acrylic
 
