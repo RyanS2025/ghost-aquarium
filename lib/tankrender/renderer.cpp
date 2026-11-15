@@ -30,18 +30,19 @@ void drawRays(const Tank& tk, Frame& f, int rowBegin = 0, int rowEnd = 1 << 30) 
     const float sway = 7.f * std::sin(t * 0.21f + ray.phase);
     const float a = 0.11f * fx.rays * (0.6f + 0.4f * std::sin(t * 0.5f + ray.phase * 2.f));
     const float x0 = ray.x + sway;
-    for (int y = std::max(y0, rowBegin), ye = std::min(yb, rowEnd); y < ye; ++y) {
+    for (int y = std::max({y0, rowBegin, f.originY}), ye = std::min({yb, rowEnd, f.originY + f.h}); y < ye; ++y) {
       const float u = static_cast<float>(y - y0) / (yb - y0), k = a * (1.f - u);
       const int ar = Frame::roundHalfUp(rr * k / 8.f), ag = Frame::roundHalfUp(rg * k / 4.f), ab = Frame::roundHalfUp(rb * k / 8.f);
       if (!(ar | ag | ab)) continue;
       const float cx = x0 + ray.slant * u, hw = ray.w / 2.f + (ray.w * 0.9f - ray.w / 2.f) * u;
       const int xa = std::max(0, Frame::roundHalfUp(cx - hw)), xe = std::min(f.w, Frame::roundHalfUp(cx + hw));
-      for (int x = xa; x < xe; ++x) f.add565(y * f.w + x, ar, ag, ab);
+      for (int x = xa; x < xe; ++x) f.add565((y - f.originY) * f.w + x, ar, ag, ab);
     }
   }
 }
 
-void drawPlankton(const Tank& tk, Frame& f) {  // single twinkling pixels
+template <class Sink>
+void drawPlankton(const Tank& tk, Sink& f) {  // single twinkling pixels
   const float t = tk.animTime(), vib = tk.fx().vibrance;
   for (int i = 0; i < kPlanktonCount; ++i) {
     const Plankton& p = tk.plankton()[i];
@@ -51,7 +52,8 @@ void drawPlankton(const Tank& tk, Frame& f) {  // single twinkling pixels
   }
 }
 
-void drawRocks(const Tank& tk, Frame& f) {
+template <class Sink>
+void drawRocks(const Tank& tk, Sink& f) {
   const FxTuning& fx = tk.fx();
   const float baseY = kScreen.h - 3.f;
   const Hsl mossC = rgbToHsl(kScene.seaweedTip);
@@ -74,7 +76,8 @@ void drawRocks(const Tank& tk, Frame& f) {
   }
 }
 
-void drawSeaweed(const Tank& tk, Frame& f) {
+template <class Sink>
+void drawSeaweed(const Tank& tk, Sink& f) {
   const float t = tk.animTime(), vib = tk.fx().vibrance;
   const Hsl b = rgbToHsl(kScene.seaweedBase), tip = rgbToHsl(kScene.seaweedTip);
   for (const Seaweed& s : tk.seabed().seaweed) {
@@ -88,7 +91,8 @@ void drawSeaweed(const Tank& tk, Frame& f) {
   }
 }
 
-void drawCoral(const Tank& tk, Frame& f) {
+template <class Sink>
+void drawCoral(const Tank& tk, Sink& f) {
   if (!tk.fx().reef) return;
   const float t = tk.animTime(), vib = tk.fx().vibrance;
   for (const Coral& c : tk.seabed().coral) {
@@ -109,7 +113,8 @@ void drawCoral(const Tank& tk, Frame& f) {
   }
 }
 
-void drawSand(const Tank& tk, Frame& f) {
+template <class Sink>
+void drawSand(const Tank& tk, Sink& f) {
   const float vib = tk.fx().vibrance;
   const Hsl sand = rgbToHsl(kScene.sand);
   const uint16_t sandC = hsl565(sand.h, sand.s, sand.l * 0.6f);
@@ -125,7 +130,8 @@ void drawSand(const Tank& tk, Frame& f) {
   }
 }
 
-void drawFish(const Tank& tk, Frame& f) {
+template <class Sink>
+void drawFish(const Tank& tk, Sink& f) {
   const float t = tk.animTime();
   const FxTuning& fx = tk.fx();
   for (int L = 0; L < kLayerCount; ++L) {
@@ -153,7 +159,8 @@ void drawFish(const Tank& tk, Frame& f) {
   }
 }
 
-void drawAmbient(const Tank& tk, Frame& f) {
+template <class Sink>
+void drawAmbient(const Tank& tk, Sink& f) {
   const float t = tk.animTime(), vib = tk.fx().vibrance;
   const Tuning& tu = tk.tuning();
   const Hsl bub = rgbToHsl(kScene.bubble);
@@ -195,35 +202,71 @@ void refreshBackdrop(const Tank& tk, const uint16_t* base, uint16_t* backdrop, i
   drawRays(tk, f, y0, y1);
 }
 
+void DisplayList::blit(char ch, float cx, float cy, float s, uint16_t color) {
+  if (!glyphRows(ch)) return;
+  if (n >= kMaxOps) { ++dropped; return; }
+  ops[n++] = {static_cast<int16_t>(Frame::roundHalfUp(cx - 6.f * s / 2.f)), static_cast<int16_t>(Frame::roundHalfUp(cy - 8.f * s / 2.f)),
+              color, ch, static_cast<uint8_t>(Frame::roundHalfUp(s * 2.f))};
+}
+
+void DisplayList::plot(float x, float y, uint16_t color) {
+  if (n >= kMaxOps) { ++dropped; return; }
+  ops[n++] = {static_cast<int16_t>(Frame::roundHalfUp(x)), static_cast<int16_t>(Frame::roundHalfUp(y)), color, 0, 0};
+}
+
+void buildDisplayList(const Tank& tk, DisplayList& list, uint32_t flags) {
+  list.n = 0;
+  list.dropped = 0;
+  uint32_t last = list.clock ? list.clock() : 0;
+  auto mark = [&list, &last](Frame::Stage s) {
+    if (!list.clock) return;
+    const uint32_t now = list.clock();
+    list.stageUs[s] = now - last;
+    last = now;
+  };
+  const bool baked = (flags & kBackdropHasRaysAndScenery) != 0;
+  drawPlankton(tk, list); mark(Frame::kPlankton);
+  if (!baked) drawRocks(tk, list);
+  mark(Frame::kRocks);
+  drawSeaweed(tk, list);  mark(Frame::kSeaweed);
+  drawCoral(tk, list);    mark(Frame::kCoral);
+  if (!baked) drawSand(tk, list);
+  mark(Frame::kSand);
+  drawFish(tk, list);     mark(Frame::kFish);
+  drawAmbient(tk, list);  mark(Frame::kAmbient);
+}
+
+void rasterize(const Tank& tk, const DisplayList& list, const uint16_t* background, Frame& f, uint32_t flags) {
+  const int W = static_cast<int>(kScreen.w), H = static_cast<int>(kScreen.h);
+  if (f.w != W || f.originY < 0 || f.originY + f.h > H) return;  // bands of the 320-wide screen only
+  const size_t bytes = static_cast<size_t>(f.w) * f.h * sizeof(uint16_t);
+  if (background) std::memcpy(f.px, background + static_cast<size_t>(f.originY) * W, bytes);
+  else std::memset(f.px, 0, bytes);
+  if (!(flags & kBackdropHasRaysAndScenery)) drawRays(tk, f);
+  for (int i = 0; i < list.n; ++i) {
+    const DrawOp& op = list.ops[i];
+    if (op.ch) f.blitAt(op.ch, op.x, op.y, op.scale2 * 0.5f, op.color);
+    else f.plotAt(op.x, op.y, op.color);
+  }
+}
+
+void swapBytes(uint16_t* px, size_t n) {
+  for (size_t i = 0; i < n; ++i) px[i] = static_cast<uint16_t>((px[i] >> 8) | (px[i] << 8));
+}
+
 void renderFrame(const Tank& tk, const uint16_t* background, Frame& f, uint32_t flags) {
   f.glyphs = 0;
   f.writes = 0;
-  // Full 320×240 frames only: the background copy and the ray spans assume it. Banding
-  // (ADR 0008 §7) will need a band origin + clipping; until then refuse, never overrun.
-  if (f.w != static_cast<int>(kScreen.w) || f.h != static_cast<int>(kScreen.h)) return;
-  uint32_t last = f.clock ? f.clock() : 0;
-  auto mark = [&f, &last](Frame::Stage s) {
-    if (!f.clock) return;
-    const uint32_t now = f.clock();
-    f.stageUs[s] = now - last;
-    last = now;
-  };
-  const size_t bytes = static_cast<size_t>(f.w) * f.h * sizeof(uint16_t);
-  if (background) std::memcpy(f.px, background, bytes);
-  else std::memset(f.px, 0, bytes);
-  mark(Frame::kBackground);
-  const bool baked = (flags & kBackdropHasRaysAndScenery) != 0;
-  if (!baked) drawRays(tk, f);
-  mark(Frame::kRays);
-  drawPlankton(tk, f); mark(Frame::kPlankton);
-  if (!baked) drawRocks(tk, f);
-  mark(Frame::kRocks);
-  drawSeaweed(tk, f);  mark(Frame::kSeaweed);
-  drawCoral(tk, f);    mark(Frame::kCoral);
-  if (!baked) drawSand(tk, f);
-  mark(Frame::kSand);
-  drawFish(tk, f);     mark(Frame::kFish);
-  drawAmbient(tk, f);  mark(Frame::kAmbient);
+  if (f.w != static_cast<int>(kScreen.w) || f.h != static_cast<int>(kScreen.h)) return;  // full frames only
+  static DisplayList list;  // ~8 KB: static, never on the (8 KB) loop-task stack
+  list.clock = f.clock;
+  buildDisplayList(tk, list, flags);
+  const uint32_t t0 = f.clock ? f.clock() : 0;
+  rasterize(tk, list, background, f, flags);
+  if (f.clock) {
+    for (int i = 0; i < Frame::kStageCount; ++i) f.stageUs[i] = list.stageUs[i];
+    f.stageUs[Frame::kRaster] = f.clock() - t0;
+  }
 }
 
 }  // namespace tank::render
