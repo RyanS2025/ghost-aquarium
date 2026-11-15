@@ -134,7 +134,7 @@ const SPECIES = [                              // species index == layer in v1
 const FONT_PX = [8, 10, 13];
 const ADV = FONT_PX.map((p) => p * 0.62);     // monospace character advance
 const BODY_SPACE = [0.7, 1.0, 1.35];          // separation scales with body size per layer
-const MAX_PARTICLES = 320, MAX_RIPPLES = 24, BUBBLE_CAP = 64, HIST_CAP = 260;
+const MAX_PARTICLES = 320, MAX_RIPPLES = 24, BUBBLE_CAP = 64;
 const SEAWEED_COUNT = 5, SEAWEED_SEG_PX = 7, PLANKTON = 44;
 const TAU = Math.PI * 2;
 const HOME_MIN = SURFACE_Y + 32, HOME_MAX = H - 48;   // fish stay above the reef
@@ -149,37 +149,36 @@ const FIELDS = [
   { k: "cohesionWeight",   g: "Schooling", def: 0.35, min: 0, max: 4,   step: 0.05 },
   { k: "alignmentWeight",  g: "Schooling", def: 1.0, min: 0,  max: 4,   step: 0.05 },
   { k: "separationWeight", g: "Schooling", def: 2.2, min: 0,  max: 5,   step: 0.05 },
-  { k: "wanderWeight",     g: "Wander & edges", def: 0.8, min: 0, max: 3,  step: 0.05 },
-  { k: "wanderJitter",     g: "Wander & edges", def: 2.2, min: 0, max: 12, step: 0.1 },
+  { k: "wanderWeight",     g: "Wander & edges", def: 0.6, min: 0, max: 3,  step: 0.05 },
+  { k: "wanderJitter",     g: "Wander & edges", def: 1.6, min: 0, max: 12, step: 0.1 },
   { k: "edgeMargin",       g: "Wander & edges", def: 36,  min: 4, max: 80, step: 1 },
   { k: "edgeWeight",       g: "Wander & edges", def: 2.8, min: 0, max: 8,  step: 0.1 },
   { k: "facingThreshold",  g: "Wander & edges", def: 2,   min: 0, max: 15, step: 0.5 },
   { k: "fishPerLayer",     g: "Population", def: [5, 4, 3], min: 0, max: 20, step: 1, sub: LAYER_NAMES, int: true, respawn: true },
-  { k: "bubblesPerSec",    g: "Bubbles",   def: 1.2, min: 0,  max: 10,  step: 0.1 },
+  { k: "bubblesPerSec",    g: "Bubbles",   def: 1.0, min: 0,  max: 10,  step: 0.1 },
   { k: "bubbleRise",       g: "Bubbles",   def: 25,  min: 2,  max: 80,  step: 1 },
   { k: "bubbleWobbleAmp",  g: "Bubbles",   def: 2,   min: 0,  max: 10,  step: 0.25 },
   { k: "bubbleWobbleHz",   g: "Bubbles",   def: 1.2, min: 0,  max: 5,   step: 0.05 },
   { k: "seaweedSwayAmp",   g: "Seaweed",   def: 7,   min: 0,  max: 20,  step: 0.5 },
   { k: "seaweedHz",        g: "Seaweed",   def: [0.31, 0.83], min: 0, max: 2, step: 0.01, sub: ["slow", "fast"] },
   // ---- new fields (draft; DESIGN update pending)
-  { k: "maxTurnRate",      g: "Turning", fx: true, def: 2.4,  min: 0.5, max: 8,  step: 0.1 },
-  { k: "bodyMaxBend",      g: "Turning", fx: true, def: 20,   min: 5,   max: 60, step: 1 },
+  { k: "maxTurnRate",      g: "Turning", fx: true, def: 1.6,  min: 0.5, max: 8,  step: 0.1 },
+  { k: "maxTilt",          g: "Turning", fx: true, def: 15,   min: 0,   max: 35, step: 1 },
   { k: "turnTime",         g: "Turning", fx: true, def: 0.4,  min: 0.1, max: 1.2, step: 0.05 },
   { k: "flipAngle",        g: "Turning", fx: true, def: 100,  min: 60,  max: 180, step: 5 },
-  { k: "maxPitch",         g: "Turning", fx: true, def: 40,   min: 15,  max: 85,  step: 1 },
+  { k: "maxPitch",         g: "Turning", fx: true, def: 25,   min: 15,  max: 85,  step: 1 },
   { k: "minSpeedFrac",     g: "Turning", fx: true, def: 0.3,  min: 0,   max: 0.8, step: 0.05 },
-  { k: "bodyWaveAmp",      g: "Flow", fx: true, def: 1.5,  min: 0, max: 6,   step: 0.1 },
+  { k: "bodyWaveAmp",      g: "Flow", fx: true, def: 0.8,  min: 0, max: 6,   step: 0.1 },
   { k: "bodyWaveHz",       g: "Flow", fx: true, def: 1.4,  min: 0, max: 5,   step: 0.05 },
   { k: "levelPull",        g: "Flow", fx: true, def: 0.7,  min: 0, max: 3,   step: 0.05 },
   { k: "depthPull",        g: "Flow", fx: true, def: 0.8,  min: 0, max: 2,   step: 0.05 },
   { k: "layerSpacing",     g: "Flow", fx: true, def: 0.4,  min: 0, max: 2,   step: 0.05 },
-  { k: "wakeLength",       g: "Flow", fx: true, def: 6,    min: 0, max: 16,  step: 1, int: true },
   { k: "vibrance",         g: "Color", fx: true, def: 1.0, min: 0, max: 1.6, step: 0.05 },
   { k: "shimmer",          g: "Color", fx: true, def: 0.12, min: 0, max: 0.4, step: 0.01 },
   { k: "bgGlow",           g: "Background", fx: true, def: 0.9, min: 0, max: 1.5, step: 0.05, rebuildBg: true },
   { k: "rays",             g: "Background", fx: true, def: 0.7, min: 0, max: 1.5, step: 0.05 },
   { k: "reef",             g: "Background", fx: true, def: 1,   min: 0, max: 1,   step: 1, int: true },
-  { k: "dartPerSec",       g: "Splashes", fx: true, def: 0.03, min: 0, max: 0.3, step: 0.005 },
+  { k: "dartPerSec",       g: "Splashes", fx: true, def: 0.015, min: 0, max: 0.3, step: 0.005 },
   { k: "leapPerSec",       g: "Splashes", fx: true, def: 0.08, min: 0, max: 1,   step: 0.01 },
   { k: "splashDroplets",   g: "Splashes", fx: true, def: 16,   min: 0, max: 48,  step: 1, int: true },
 ];
@@ -209,7 +208,7 @@ const CORAL = [                               // bottom-aligned ASCII templates
 const ROCK = [" __  ", "/  \\_", "/____\\"];
 
 // ================================================================ state
-const STORE_KEY = "ghost-aquarium-tuner-v3";
+const STORE_KEY = "ghost-aquarium-tuner-v4";
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const defaultsT = () => Object.fromEntries(FIELDS.map((f) => [f.k, clone(f.def)]));
 let T = defaultsT(), palettes = clone(DEFAULT_PALETTES), scene = clone(DEFAULT_SCENE), seed = 42;
@@ -272,8 +271,8 @@ function makeTank(s) {
         pos: v(rng.uniform(T.edgeMargin, W - T.edgeMargin), clamp(homeBase, HOME_MIN, HOME_MAX)),
         vel: v(Math.cos(a) * sp, Math.sin(a) * sp),
         wanderAngle: a, facingRight: Math.cos(a) > 0, wavePhase: rng.uniform(0, TAU),
-        boostT: 0, leapT: 0, airborne: false, hist: [], body: [],
-        homeBase, homeY: homeBase, turnP: 0, pendingRight: false, turnSwapped: false,
+        boostT: 0, leapT: 0, airborne: false, body: [], tilt: 0,
+        homeBase, homeY: homeBase, turnP: 0, flipTurn: false, turnSwapped: false,
       });
     }
   }
@@ -360,39 +359,17 @@ function steerSchool(f, all) {
 }
 
 // ---------------------------------------------------------------- body
-// Points spaced `spacing` px apart along the path the head has travelled (head first).
-function pathPoints(f, n, spacing) {
-  const pts = [v(f.pos.x, f.pos.y)];
-  let prev = pts[0], need = spacing;
-  for (let i = f.hist.length - 1; i >= 0 && pts.length < n; i--) {
-    const p = f.hist[i];
-    let seg = Math.hypot(prev.x - p.x, prev.y - p.y);
-    while (seg >= need && pts.length < n) {
-      const t = need / seg, q = v(prev.x + (p.x - prev.x) * t, prev.y + (p.y - prev.y) * t);
-      pts.push(q); prev = q; seg -= need; need = spacing;
-    }
-    need -= seg; prev = p;
-  }
-  const back = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
-  while (pts.length < n) { const l = pts[pts.length - 1]; pts.push(v(l.x - back.x * spacing, l.y - back.y * spacing)); }
-  return pts;
-}
-
-// Follow the path, but each segment may bend at most `maxBend` from the one before it:
-// the body curves into a smooth arc and can never fold back on itself.
-function bodyChain(f, n, spacing, maxBend) {
-  const raw = pathPoints(f, n, spacing);
-  const out = [raw[0]];
-  let prev = len(f.vel) > 1e-3 ? norm(v(-f.vel.x, -f.vel.y)) : v(f.facingRight ? -1 : 1, 0);   // tail-ward
-  for (let j = 1; j < n; j++) {
-    const want = norm(v(raw[j].x - out[j - 1].x, raw[j].y - out[j - 1].y));
-    const a0 = Math.atan2(prev.y, prev.x);
-    const a1 = len(want) > 0 ? Math.atan2(want.y, want.x) : a0;
-    const a = a0 + clamp(wrapAngle(a1 - a0), -maxBend, maxBend);
-    prev = v(Math.cos(a), Math.sin(a));
-    out.push(v(out[j - 1].x + prev.x * spacing, out[j - 1].y + prev.y * spacing));
-  }
-  return out;
+// ASCII fish only read as fish when their characters sit in ONE straight, evenly spaced row.
+// (Bending the text along the swim path measured -22°..+47° across a single body and turned
+// fish into scattered punctuation.) So the body is rigid: a row behind the head, tilted by a
+// smoothed, small "visual pitch". `squeeze` shortens it around its middle for flip-turns.
+function rigidBody(f, n, spacing, squeeze = 1) {
+  const back = f.facingRight ? -1 : 1, tilt = Math.tan(f.tilt || 0);
+  const pts = [];
+  for (let j = 0; j < n; j++) pts.push(v(f.pos.x + back * j * spacing, f.pos.y - j * spacing * tilt));
+  if (squeeze === 1) return pts;
+  const mid = pts[(n - 1) >> 1];
+  return pts.map((p) => v(mid.x + (p.x - mid.x) * squeeze, mid.y + (p.y - mid.y) * squeeze));
 }
 
 // ---------------------------------------------------------------- particles + splashes
@@ -446,21 +423,21 @@ function burst(tk, x, y) {                      // tap underwater: sparkles + sc
 const LEAP_VY = 100, LEAP_X_MIN = 70, LEAP_X_MAX = W - 70;
 function startLeap(tk, f) {
   const ms = T.maxSpeed[f.layer];
-  const dir = f.pos.x < W / 2 ? 1 : -1;        // leap toward the middle of the tank
+  const dir = f.vel.x >= 0 ? 1 : -1;           // keep its direction: no glyph swap mid-leap
   f.leapT = 2.2; f.boostT = 1.2;
   f.vel = v(dir * ms * 1.1, -LEAP_VY);
 }
 
 function tryAutoLeap(tk) {
+  // only fish near the surface, away from the side walls, already heading toward the middle
   const cands = tk.fish.filter((f) => f.layer > 0 && !f.airborne && f.leapT <= 0 && f.turnP === 0 &&
-    f.pos.y < SURFACE_Y + 70 && f.pos.x > LEAP_X_MIN && f.pos.x < LEAP_X_MAX);
+    f.pos.y < SURFACE_Y + 70 && f.pos.x > LEAP_X_MIN && f.pos.x < LEAP_X_MAX && (f.pos.x < W / 2) === (f.vel.x > 0));
   if (cands.length) startLeap(tk, cands[tk.rng.int(cands.length)]);
 }
 
 // ---------------------------------------------------------------- step
 function step(tk, dt) {
   const rng = tk.rng;
-  const maxBend = T.bodyMaxBend * Math.PI / 180;
   // 1) forces from one snapshot (order-independent)
   const edgeFrac = [], nav = [];
   const forces = tk.fish.map((f, i) => {
@@ -478,6 +455,7 @@ function step(tk, dt) {
       if ((f.pos.x < m && ex < 0) || (f.pos.x > W - m && ex > 0)) ex = 0;
       if ((f.pos.y < SURFACE_Y + m && ey < 0) || (f.pos.y > H - 30 - m && ey > 0)) ey = 0;
       fx += ex * T.maxForce * 6; fy += ey * T.maxForce * 6;
+      nav[i] = v(nav[i].x + ex * T.maxForce * 6, nav[i].y + ey * T.maxForce * 6);   // a startle may reverse
     }
     if (f.leapT > 0) return v(c.x * 0.3, 0);
     // Wall avoidance has priority: near a wall the other forces are scaled down and the
@@ -548,39 +526,30 @@ function step(tk, dt) {
     const speed = len(f.vel);
     f.wavePhase += TAU * T.bodyWaveHz * (0.4 + 0.9 * clamp(speed / ms, 0, 2.5)) * dt;
 
-    // body history (stored by distance) + the bend-limited body chain
-    const last = f.hist[f.hist.length - 1];
-    if (!last || Math.hypot(f.pos.x - last.x, f.pos.y - last.y) >= 1) { f.hist.push(v(f.pos.x, f.pos.y)); if (f.hist.length > HIST_CAP) f.hist.shift(); }
     const n = SPECIES[f.layer].right.length;
 
-    // turn animation. Halfway through (body fully foreshortened) the fish swaps sides:
-    //  - flip-turn: reverse vx and mirror the path history around the head, so the body
-    //    lies straight on the new side instead of wrapped around a tight curve
-    //  - arc-turn: just swap the glyph (the body already lies the other way)
+    // Flip-turn: the ONLY way a fish reverses. Halfway through (body fully foreshortened,
+    // as if turning toward you) it swaps direction; the rigid body simply re-forms on the
+    // other side.
     if (f.turnP > 0) {
       f.turnP += dt / T.turnTime;
       if (!f.turnSwapped && f.turnP >= 0.5) {
-        if (f.flipTurn) {
-          f.vel.x = -f.vel.x;
-          for (const h of f.hist) h.x = 2 * f.pos.x - h.x;
-          f.facingRight = f.vel.x > 0;
-          f.wanderAngle = -f.wanderAngle;   // mirror the heading-relative wander too
-        } else {
-          f.facingRight = f.pendingRight;
-        }
+        f.vel.x = -f.vel.x;
+        f.facingRight = f.vel.x > 0;
+        f.wanderAngle = -f.wanderAngle;   // mirror the heading-relative wander too
         f.turnSwapped = true;
       }
       if (f.turnP >= 1) { f.turnP = 0; f.flipTurn = false; }
+    } else if (!f.airborne && Math.abs(f.vel.x) > T.facingThreshold && (f.vel.x > 0) !== f.facingRight) {
+      // safety net: if velocity ever disagrees with the glyph, turn properly (never swap in one frame)
+      f.vel.x = -f.vel.x; f.turnP = 1e-6; f.flipTurn = true; f.turnSwapped = false;
     }
-    f.body = bodyChain(f, n, ADV[f.layer], maxBend);
 
-    // arc-turns: flip the glyph only when the BODY actually lies the other way, so it
-    // always reads head-to-tail correctly
-    if (f.turnP === 0 && !f.airborne) {
-      const dx = f.body[0].x - f.body[n - 1].x, hyst = 0.3 * (n - 1) * ADV[f.layer];
-      const flip = f.facingRight ? (dx < -hyst && f.vel.x < -T.facingThreshold) : (dx > hyst && f.vel.x > T.facingThreshold);
-      if (flip) { f.turnP = 1e-6; f.pendingRight = !f.facingRight; f.turnSwapped = false; }
-    }
+    // visual tilt follows the swim pitch, smoothed and limited (steeper only mid-leap)
+    const tiltMax = (f.airborne || f.leapT > 0 ? 35 : T.maxTilt) * Math.PI / 180;
+    const tiltTarget = clamp(Math.atan2(f.vel.y, Math.abs(f.vel.x) + 1e-6) * 0.8, -tiltMax, tiltMax);
+    f.tilt = (f.tilt || 0) + (tiltTarget - (f.tilt || 0)) * Math.min(1, dt * 4);
+    f.body = rigidBody(f, n, ADV[f.layer]);
 
     // surface crossings → splashes
     if (!f.airborne && f.pos.y < SURFACE_Y && f.vel.y < 0) { f.airborne = true; splash(tk, f.pos.x, Math.abs(f.vel.y), fishColorHead(f)); }
@@ -766,36 +735,22 @@ function draw(tk) {
   drawReef(tk);
 
   // fish, far → near
-  const maxBend = T.bodyMaxBend * Math.PI / 180;
   for (let L = 0; L < 3; L++) {
     const fp = FONT_PX[L], adv = ADV[L];
+    ctx.font = `bold ${fp}px monospace`;
     for (const f of tk.fish) {
       if (f.layer !== L) continue;
       const g = SPECIES[L];
       const headFirst = f.facingRight ? [...g.right].reverse() : [...g.left];
-      const n = headFirst.length, wake = f.airborne ? 0 : T.wakeLength;
-      // turn animation: the body shortens around its middle (fish turning toward you), then lengthens
-      const squeeze = f.turnP > 0 ? Math.max(0.15, Math.abs(1 - 2 * f.turnP)) : 1;
-      const pts = bodyChain(f, n + wake, adv, maxBend);
-      const mid = pts[(n - 1) >> 1];
-      const body = pts.slice(0, n).map((p) => v(mid.x + (p.x - mid.x) * squeeze, mid.y + (p.y - mid.y) * squeeze));
-
-      if (wake > 0 && squeeze === 1) {
-        ctx.font = `${Math.max(6, fp - 3)}px monospace`;
-        const [, b] = palHsl[f.pal % palHsl.length], d = DEPTH[L];
-        for (let k = 1; k <= wake; k++) {
-          const p = pts[n - 1 + k], fade = 1 - k / (wake + 1);
-          ctx.fillStyle = hsl(lerpHue(b[0], 215, d.blue), b[1] * d.s * T.vibrance, b[2] * d.l * 0.55 * fade);
-          ctx.fillText(k % 3 === 0 ? "-" : ".", P(p.x), P(p.y));
-        }
-      }
-      ctx.font = `bold ${fp}px monospace`;
+      const n = headFirst.length;
+      // flip-turn: the row shortens around its middle (fish turning toward you), then lengthens
+      const squeeze = f.turnP > 0 ? Math.max(0.12, Math.abs(1 - 2 * f.turnP)) : 1;
+      const body = rigidBody(f, n, adv, squeeze);
       for (let j = 0; j < n; j++) {
-        const a = body[Math.max(0, j - 1)], b = body[Math.min(n - 1, j + 1)];
-        const dir = norm(v(a.x - b.x, a.y - b.y)), perp = v(-dir.y, dir.x);
-        const off = T.bodyWaveAmp * squeeze * Math.pow(j / (n - 1), 1.3) * Math.sin(f.wavePhase - j * 0.9);
+        // a small tail wiggle: grows toward the tail, never enough to break the row
+        const wig = T.bodyWaveAmp * squeeze * (j / (n - 1)) ** 1.5 * Math.sin(f.wavePhase - j * 0.9);
         ctx.fillStyle = fishCharColor(f, j, n, t);
-        ctx.fillText(headFirst[j], P(body[j].x + perp.x * off), P(body[j].y + perp.y * off));
+        ctx.fillText(headFirst[j], P(body[j].x), P(body[j].y + wig));
       }
     }
   }
@@ -966,7 +921,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, bodyChain,
+window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, rigidBody,
   leap: () => tryAutoLeap(tank), burst: (x, y) => burst(tank, x, y) };
 </script>
 </body>
