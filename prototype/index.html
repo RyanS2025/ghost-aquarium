@@ -420,11 +420,12 @@ function steerSchool(f, all) {
       if (d < r && d > 1e-4) { const w = T.layerSpacing * (r - d) / r / d; sep.x += dx * w; sep.y += dy * w; }
       continue;
     }
+    // separation to the nearest BODY point, even when the head is far (else long fish's tails overlap)
+    if (d < sepR && d > 1e-4) { const w = (sepR - d) / sepR / d; sep.x += dx * w; sep.y += dy * w; }
     const hd = Math.hypot(f.pos.x - o.pos.x, f.pos.y - o.pos.y);
-    if (hd > T.neighborRadius) continue;
+    if (hd > T.neighborRadius) continue;  // alignment + cohesion: heads in range only
     n++;
     avgVel.x += o.vel.x; avgVel.y += o.vel.y; center.x += o.pos.x; center.y += o.pos.y;
-    if (d < sepR && d > 1e-4) { const w = (sepR - d) / sepR / d; sep.x += dx * w; sep.y += dy * w; }
   }
   const ms = T.maxSpeed[f.layer];
   const seek = (dir) => { const u = norm(dir); return len(u) === 0 ? v() : v(u.x * ms - f.vel.x, u.y * ms - f.vel.y); };
