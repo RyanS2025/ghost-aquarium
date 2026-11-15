@@ -10,8 +10,8 @@ Goal: the full tank running in the Wokwi simulator from tested code, before buyi
 - [x] PlatformIO project with `esp32s3` and `native` environments (CI workflow in place; first GitHub run happens when `phase0` is pushed)
 - [ ] `tanksim` library: fish movement, coming & going, ambient life, seabed, fixed timestep, with unit tests. **Done except schooling** (Task 4, in progress)
 - [x] 100,000-step soak test passes: no NaN, no vertical escapes, facing always correct, away cap exact, same seed gives the same result
-- [ ] Renderer and main loop running in Wokwi, with frame time logged. **Renderer done and tested; firmware builds; Wokwi run pending**
-- [ ] Wokwi recording added to the README
+- [x] Renderer and main loop running in Wokwi, with frame time logged (`make sim`; Wokwi emulates slower than real time, so fps is measured on hardware in Phase 1)
+- [x] Wokwi screenshot added to the README (a recording comes with the Phase 1 demo video)
 
 Detailed tasks: [Phase 0 plan](plans/2026-11-14-phase0-sim-and-renderer.md)
 

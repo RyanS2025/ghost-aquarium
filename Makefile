@@ -37,9 +37,12 @@ sim: build-sim ## Boot the firmware in Wokwi headlessly: checks for an fps= line
 	@test -x "$(WOKWI)" || { echo "wokwi-cli missing: run 'make setup' for instructions"; exit 1; }
 	@test -n "$$WOKWI_CLI_TOKEN" || { echo "WOKWI_CLI_TOKEN not set: run 'make setup' for instructions"; exit 1; }
 	@mkdir -p $(OUT)
-	"$(WOKWI)" . --timeout 20000 --expect-text "fps=" --serial-log-file $(OUT)/wokwi-serial.log \
-	  --screenshot-part lcd --screenshot-time 15000 --screenshot-file $(OUT)/wokwi-screen.png
-	@echo "serial log: $(OUT)/wokwi-serial.log"; grep -m3 "fps=" $(OUT)/wokwi-serial.log || true
+	@# Run a fixed 12 s (no --expect-text: it stops the sim at the first match, before the
+	@# screenshot), screenshot at 11 s, then require an fps= line in the log ourselves.
+	"$(WOKWI)" . --timeout 12000 --timeout-exit-code 0 --serial-log-file $(OUT)/wokwi-serial.log \
+	  --screenshot-part lcd --screenshot-time 11000 --screenshot-file $(OUT)/wokwi-screen.png
+	@grep -q "fps=" $(OUT)/wokwi-serial.log || { echo "FAIL: no fps= line in the serial log"; exit 1; }
+	@echo "serial log: $(OUT)/wokwi-serial.log"; grep "ghost-aquarium up\|fps=" $(OUT)/wokwi-serial.log
 	@echo "screenshot: $(OUT)/wokwi-screen.png"
 
 snapshot: ## Render one frame with the C++ renderer → .pio/out/frame.png (and open it)

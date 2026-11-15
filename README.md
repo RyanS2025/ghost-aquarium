@@ -6,6 +6,10 @@
 
 ---
 
+![The firmware running on a simulated ESP32-S3 + ILI9341 in Wokwi](docs/media/wokwi-firmware.png)
+
+*The real firmware running on a simulated ESP32-S3 + ILI9341 (Wokwi), shown un-mirrored. On the device the panel mirrors it for the reflector.*
+
 ## How it works
 
 ```
