@@ -26,7 +26,7 @@ Light from the screen reflects off the angled sheet toward your eye. Black pixel
 
 ### Runs on the real firmware
 
-The actual firmware booted on a simulated ESP32-S3 + ILI9341 in [Wokwi](https://wokwi.com) (`make sim`):
+The actual firmware booted on a simulated ESP32-S3 in [Wokwi](https://wokwi.com) (`make sim`). Wokwi has no SSD1351 OLED, so the simulator draws the 128×128 tank in the middle of an ILI9341 screen:
 
 ![The firmware running on a simulated ESP32-S3 + ILI9341 in Wokwi](docs/media/wokwi-firmware.png)
 
@@ -36,8 +36,8 @@ The actual firmware booted on a simulated ESP32-S3 + ILI9341 in [Wokwi](https://
 |---|---|
 | **Legible, calm motion** | Fish are rigid ASCII rows on float positions, steered by wander, schooling, wall and depth forces. Reversal is always an animated flip-turn, never a bent or folded body. Fish swim out of view and return a few seconds later. Every rule was measured in the prototype ([ADR 0009](docs/adr/0009-motion-model.md)). |
 | **Designed against the real hardware** | The browser prototype's default view is a software renderer that reproduces the device exactly: an RGB565 framebuffer, a 5×7 bitmap font, whole-pixel positions and 30 fps. It is the reference for the C++ renderer ([ADR 0008](docs/adr/0008-device-render-pipeline-and-budgets.md)). |
-| **No flicker or tearing** | Each frame is rebuilt off-screen from a pre-rendered, Bayer-dithered background, then pushed whole. The budget is about 290 glyph blits per frame against a 31 ms SPI push ([DESIGN §8](docs/DESIGN.md#8-performance-budget-adr-0008)). |
-| **Made for the reflector** | Black is invisible on the glass, so the water glow fades to pure black at every screen edge and no effect leaves gray residue. The panel mirrors the image in hardware. |
+| **No flicker or tearing** | Each frame is rebuilt off-screen from a pre-rendered, Bayer-dithered background, then pushed whole. On the 128×128 OLED a frame is under 90 draw ops and a 32 KB push of about 13 ms ([DESIGN §8](docs/DESIGN.md#8-performance-budget-adr-0008)). |
+| **Made for the reflector** | The OLED's black pixels are off, so only the fish appear on the glass. The water glow still fades to pure black at every edge, no effect leaves gray residue, the panel mirrors the image in hardware, and a slow 1 px drift protects against burn-in. |
 | **Stable simulation** | A fixed 60 Hz timestep, separate from the render rate, with capped catch-up steps. Deterministic for a given seed. |
 | **Testable firmware** | Simulation (`lib/tanksim`) and rendering (`lib/tankrender`) are hardware-free C++ libraries, unit-tested on a laptop (soak tests, determinism, invariants) and run in CI on every push. |
 | **Built for 24/7** | Task watchdog, fixed-capacity pools (no heap allocation per frame), deterministic seeded randomness. |

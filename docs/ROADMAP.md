@@ -29,9 +29,9 @@ Goal: a finished desk piece and a 30-second demo video.
 - [ ] About 1mm clear PETG or acrylic sheet (optionally beam-splitter film)
 
 **128×128 port** ([ADR 0010](adr/0010-display-ssd1351-oled.md))
-- [ ] Screen size in one place; scene re-tuned for 128×128; soak tests pass at the new size
-- [ ] SSD1351 panel config, with the ILI9341 kept for Wokwi; `make sim` shows the 128×128 tank
-- [ ] Burn-in protection: slow whole-image drift, no static UI
+- [x] Screen size in one place; scene re-tuned for 128×128; soak tests pass at the new size
+- [x] SSD1351 panel config, with the ILI9341 kept for Wokwi; `make sim` shows the 128×128 tank
+- [ ] Burn-in protection: slow whole-image drift, no static UI. Drift is implemented and its path unit-tested; tick once it is seen on the panel
 
 **Bring-up**
 - [ ] Firmware from Phase 0 running on the real screen on a breadboard

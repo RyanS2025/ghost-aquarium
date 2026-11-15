@@ -1,6 +1,6 @@
 # 0003. Render with LovyanGFX: full-frame sprite, DMA push, mirroring in hardware
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [0010](0010-display-ssd1351-oled.md): the panel is now a 128×128 SSD1351, mirrored with rotation 6; the 320×240 bandwidth figures below apply to the simulator only)
 - **Date:** 2026-11-14
 
 ## Context

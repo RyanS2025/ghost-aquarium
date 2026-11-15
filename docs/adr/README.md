@@ -6,12 +6,12 @@ Each ADR records one significant decision: the context, what was chosen, what wa
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted |
 | [0002](0002-display-ili9341-28.md) | Use a 2.8" ILI9341 TFT for v1; OLED as an optional upgrade | Superseded by 0010 |
-| [0003](0003-rendering-lovyangfx-sprite.md) | Render with LovyanGFX: full-frame sprite, DMA push, mirroring in hardware | Accepted |
+| [0003](0003-rendering-lovyangfx-sprite.md) | Render with LovyanGFX: full-frame sprite, DMA push, mirroring in hardware | Accepted (amended by 0010) |
 | [0004](0004-toolchain-platformio-wokwi.md) | One PlatformIO codebase for the Wokwi simulator and the hardware | Accepted |
 | [0005](0005-motion-subpixel-steering.md) | Sub-pixel float motion with steering behaviors and a fixed timestep | Accepted (amended by 0009) |
 | [0006](0006-host-testable-sim-library.md) | Keep the simulation in a hardware-free library tested on the laptop | Accepted |
 | [0007](0007-browser-prototype-first.md) | Tune the look in a browser prototype before porting to C++ | Accepted |
-| [0008](0008-device-render-pipeline-and-budgets.md) | Device render pipeline: RGB565 reference renderer, dithered background, fixed pools, banding fallback | Accepted (estimates pending Phase 1) |
+| [0008](0008-device-render-pipeline-and-budgets.md) | Device render pipeline: RGB565 reference renderer, dithered background, fixed pools, banding fallback | Accepted (estimates pending Phase 1; amended by 0010) |
 | [0009](0009-motion-model.md) | Motion model: rigid ASCII fish, flip-turns, coming and going | Accepted |
 | [0010](0010-display-ssd1351-oled.md) | Use a 1.5" 128×128 SSD1351 color OLED for v1 (true black) | Accepted |
 

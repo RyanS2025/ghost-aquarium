@@ -1,6 +1,6 @@
 # 0008. Device render pipeline and per-frame budgets
 
-- **Status:** Accepted. Frame-time numbers are estimates until Phase 1 hardware measurement.
+- **Status:** Accepted. Frame-time numbers are estimates until Phase 1 hardware measurement. Amended by [0010](0010-display-ssd1351-oled.md): at 128×128 a frame is 32 KB, bands are 4 × 32 rows, and the per-frame budgets below were measured at 320×240.
 - **Date:** 2026-11-14
 - **Refines:** [ADR 0003](0003-rendering-lovyangfx-sprite.md)
 

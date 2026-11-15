@@ -20,21 +20,20 @@ Black pixels are invisible in the reflection, and anything lit floats. Therefore
 - The water glow fades to **pure black at all four screen edges**, so the outline of the screen never shows on the reflector.
 - No effect may leave non-black residue (for example, alpha-faded trails). Every frame is rebuilt from the background.
 - The box interior is matte black, and the sheet is as thin as practical (about 1 mm) to keep the second reflection small.
+- **Burn-in protection (OLED, [ADR 0010](adr/0010-display-ssd1351-oled.md)).** The whole image drifts 1 px every 2 minutes along a 5×5 px snake path and back (a 96-minute cycle, never a jump), and the strip it uncovers is blacked out. There is no static UI. The night-dim schedule (Phase 1) adds to this.
 
 ## 4. Scene
 
-All on a 320×240 screen. The water surface is at y = 20.
-
-> **Changing:** v1 now targets a 128×128 OLED ([ADR 0010](adr/0010-display-ssd1351-oled.md)). This section describes the tuned 320×240 scene until the 128×128 port lands.
+All on a 128×128 screen, a 21 × 16 grid of 6×8 character cells ([ADR 0010](adr/0010-display-ssd1351-oled.md)). The water surface is at y = 12. The size is defined once, in `lib/tanksim/tuning.h` (`kScreenW`, `kScreenH`). The look was tuned at 320×240 in the [browser prototype](../prototype/index.html), which still opens at that size, and then scaled down to this.
 
 | Element | Content |
 |---|---|
-| **Fish** | 12 fish in 3 depth layers (5 Far, 4 Mid, 3 Near). Each is a rigid ASCII row with its own color palette. |
+| **Fish** | 5 fish in 3 depth layers (2 Far, 2 Mid, 1 Near). Each is a rigid ASCII row with its own color palette. |
 | **Water surface** | A row of `~` with gentle waves, ripples from splashes and popping bubbles, and occasional white `'` glints. |
-| **Light rays** | 4 soft beams from the surface that sway and pulse slowly. They are added on top of the background (additive), not blended. |
+| **Light rays** | 3 soft beams from the surface that sway and pulse slowly. They are added on top of the background (additive), not blended. |
 | **Water glow** | Teal under the surface, then indigo, then violet in the depths, faded to black at every edge. Pre-rendered once and dithered. |
-| **Seabed** | 4 ASCII rocks, 4 seaweed stalks and 3 coral pieces, packed left to right with even gaps, never overlapping. Sand `, . \`` and colored pebbles `o` along the bottom. |
-| **Plankton** | 32 single-pixel specks that drift and twinkle in cyan and reef colors. |
+| **Seabed** | 2 ASCII rocks, 3 seaweed stalks and 1 coral piece, packed left to right with even gaps, never overlapping. Sand `, . \`` and colored pebbles `o` along the bottom. |
+| **Plankton** | 12 single-pixel specks that drift and twinkle in cyan and reef colors. |
 | **Bubbles** | Ambient bubbles `o` rise and wobble, then pop at the surface with a small ripple. |
 | **Splashes** | Droplets `' .` arc up and fall back; sparkles `*` and bubbles appear when a fish leaps out of or back into the water. |
 
@@ -43,8 +42,10 @@ All on a 320×240 screen. The water surface is at y = 20.
 | Layer | Facing right | Facing left | Font scale | Character advance |
 |---|---|---|---|---|
 | Far | `><>` | `<><` | 1× | 6 px |
-| Mid | `><('>` | `<')><` | 1.5× | 9 px |
-| Near | `><((('>` | `<')))><` | 2× | 12 px |
+| Mid | `><('>` | `<')><` | 1× | 6 px |
+| Near | `><((('>` | `<')))><` | 1× | 6 px |
+
+At 128 px every layer draws at 1×: 1.5× and 2× glyphs were too large for the tank, and a 1.5× nearest-neighbor glyph has uneven pixel rows. Depth comes from body length (3, 5, 7 characters), speed and color grading (§7).
 
 ### Fish palettes (head color → tail color)
 
@@ -52,9 +53,9 @@ All on a 320×240 screen. The water surface is at y = 20.
 
 ### Seabed pieces
 
-- **Rocks:** a jittered half-ellipse outline filled with a character grid. The top edge uses `/` `\` `-` depending on slope, the sides use `(` `)`, the inside is about 70% `#` with some `%` and `:`, and some flat top cells grow `"` moss. One or two rocks carry a `*` starfish. Sizes are 60×28, 40×20, 24×12 and 14×7 px (±15%).
+- **Rocks:** a jittered half-ellipse outline filled with a character grid. The top edge uses `/` `\` `-` depending on slope, the sides use `(` `)`, the inside is about 70% `#` with some `%` and `:`, and some flat top cells grow `"` moss. One or two rocks carry a `*` starfish. Sizes are 30×18 and 18×11 px (±15% wide, −15%/+20% tall).
 - **Coral templates:** branch coral, sea fan, anemone (glows), brain coral, tube sponges. These are the five templates in `prototype/index.html` (`CORAL`), 5 characters wide.
-- **Seaweed:** alternating `(` and `)` every 8 px, rooted at the bottom, swaying more toward the tip.
+- **Seaweed:** alternating `(` and `)` every 8 px, 22–46 px tall, rooted at the bottom, swaying more toward the tip.
 
 ## 5. Motion rules ([ADR 0009](adr/0009-motion-model.md))
 
@@ -74,35 +75,35 @@ All on a 320×240 screen. The water surface is at y = 20.
 8. **Preferred depth.** Each fish gets its own band within its layer (spread evenly). Its preferred depth (homeY) drifts at ±8 px/s and is pulled back toward that band.
 9. **Coming and going.** Exits are **reserved**: a fish that enters the side margin heading outward takes a slot if fewer than `maxAwayFrac` of the fish are away or committed, and side walls are switched off for it. Fish without a slot see the side wall from the full margin, so they always have room to turn. The cap is exact. A fish that has swum completely out of view is away for `uniform(returnDelayMin, returnDelayMax)` s. It then re-enters from a random side, at the depth (best of 6 tries) farthest from its layer-mates, with a 50% chance of a new palette.
 10. **Darts:** a sprint at 2.3× speed for 0.7 s, only when the water 1 s ahead is clear, leaving a bubble spray.
-11. **Leaps:** only Mid and Near fish within 70 px of the surface, away from the side walls (70 px), already heading toward the middle. The fish exits at 100 px/s, falls under 170 px/s² gravity, and splashes on both exit and re-entry.
+11. **Leaps:** only Mid and Near fish within 32 px of the surface (a quarter of the screen), away from the side walls (the middle 56% of the width), already heading toward the middle. The fish exits at 52 px/s, falls under 120 px/s² gravity (about 11 px above the water), and splashes on both exit and re-entry.
 12. **Facing:** the glyph always matches the sign of vx outside a flip. If they ever disagree, a flip-turn starts (it never swaps in one frame).
 
 ## 6. Tuning parameters
 
-The defaults below are the values from the final prototype. Field **order** matters: the prototype's "Copy as C++" exports positional initializers in exactly this order. `test_tuning` pins the order.
+The defaults below are the final prototype values, scaled for the 128×128 tank (ADR 0010). Field **order** matters: the prototype's "Copy as C++" exports positional initializers in exactly this order. `test_tuning` pins the order.
 
 ### `tank::Tuning` (core)
 
 | Field | Default | Unit |
 |---|---|---|
-| `maxSpeed[3]` | 16, 26, 38 | px/s (Far, Mid, Near) |
-| `maxForce` | 40 | px/s² |
-| `neighborRadius` | 60 | px |
-| `separationRadius` | 26 | px (× 0.7 / 1.0 / 1.35 by layer) |
+| `maxSpeed[3]` | 7, 10, 13 | px/s (Far, Mid, Near) |
+| `maxForce` | 18 | px/s² |
+| `neighborRadius` | 32 | px |
+| `separationRadius` | 14 | px (× 0.7 / 1.0 / 1.35 by layer) |
 | `cohesionWeight` | 0.35 | |
 | `alignmentWeight` | 1.0 | |
 | `separationWeight` | 2.2 | |
 | `wanderWeight` | 0.6 | × maxForce |
 | `wanderJitter` | 1.6 | rad/s |
-| `edgeMargin` | 36 | px |
+| `edgeMargin` | 18 | px |
 | `edgeWeight` | 2.8 | × maxForce |
-| `facingThreshold` | 2 | px/s |
-| `fishPerLayer[3]` | 5, 4, 3 | fish |
-| `bubblesPerSec` | 1.0 | 1/s |
-| `bubbleRise` | 25 | px/s (× 0.8–1.2) |
-| `bubbleWobbleAmp` | 2 | px |
+| `facingThreshold` | 1 | px/s |
+| `fishPerLayer[3]` | 2, 2, 1 | fish |
+| `bubblesPerSec` | 0.5 | 1/s |
+| `bubbleRise` | 14 | px/s (× 0.8–1.2) |
+| `bubbleWobbleAmp` | 1.5 | px |
 | `bubbleWobbleHz` | 1.2 | Hz |
-| `seaweedSwayAmp` | 7 | px at the tip |
+| `seaweedSwayAmp` | 3.5 | px at the tip |
 | `seaweedHz[2]` | 0.31, 0.83 | Hz |
 
 ### `tank::FxTuning` (motion and look)
@@ -118,7 +119,7 @@ The defaults below are the values from the final prototype. Field **order** matt
 | `returnDelayMax` | 7 | s |
 | `maxAwayFrac` | 0.35 | |
 | `minSpeedFrac` | 0.3 | |
-| `bodyWaveAmp` | 0.8 | px (tail wiggle) |
+| `bodyWaveAmp` | 0.6 | px (tail wiggle) |
 | `bodyWaveHz` | 1.4 | Hz (× 0.4 + 0.9·speed/max) |
 | `levelPull` | 0.7 | |
 | `depthPull` | 0.8 | |
@@ -130,14 +131,14 @@ The defaults below are the values from the final prototype. Field **order** matt
 | `reef` | 1 | 0 or 1 |
 | `dartPerSec` | 0.015 | per fish |
 | `leapPerSec` | 0.08 | per tank |
-| `splashDroplets` | 16 | |
+| `splashDroplets` | 8 | |
 
 ## 7. Visual rules
 
 - **Depth grading** for each fish character, applied in HSL: Far lightness ×0.55, saturation ×0.80, hue 30% of the way toward 215°. Mid ×0.80, ×0.92, 10%. Near unchanged.
 - **Fish color:** head palette color → tail palette color across the row, plus shimmer `0.12·sin(3.1t − 0.85j + 1.7·id)`.
 - **Draw order:** background → rays → plankton → rocks → seaweed → coral → sand → fish (Far → Near) → bubbles → particles → surface.
-- **Font:** 5×7 glyphs in a 6×8 cell (LovyanGFX built-in style), placed at whole pixels, scaled 1× / 1.5× / 2× with nearest-neighbor.
+- **Font:** 5×7 glyphs in a 6×8 cell (LovyanGFX built-in style), placed at whole pixels. The renderer supports nearest-neighbor scaling; the 128×128 tank draws everything at 1×.
 - **Color:** RGB565 only. The background is dithered with a 4×4 Bayer matrix when quantized.
 
 ## 8. Performance budget ([ADR 0008](adr/0008-device-render-pipeline-and-budgets.md))
@@ -145,10 +146,11 @@ The defaults below are the values from the final prototype. Field **order** matt
 | Item | Budget / measured |
 |---|---|
 | Simulation | 60 Hz fixed |
-| Render | 30 fps target. A full 320×240×16-bit push at 40 MHz SPI takes ≈31 ms |
-| Per-frame drawing | ≈290 glyph blits (≈18k pixel writes) when calm, ≤365 when busy (measured in the device preview) |
-| Pools | particles 96, bubbles 24, ripples 12, plankton 32, fish 12 (fixed arrays; when a pool is full, new items are dropped) |
-| Memory | 150 KB frame in internal SRAM, 150 KB dithered background in PSRAM |
+| Render | 30 fps target. A full 128×128×16-bit frame is 32 KB, ≈13 ms at the SSD1351's 20 MHz SPI limit |
+| Per-frame drawing | ≤ 90 draw ops per frame (measured in Wokwi, `glyphs_max`); the display list holds 512 |
+| Pools | particles 64, bubbles 12, ripples 12, plankton 12, fish 5 (fixed arrays; when a pool is full, new items are dropped) |
+| Memory | Two 8 KB DMA band buffers (4 × 32 rows) in internal SRAM; 32 KB background and 32 KB backdrop in PSRAM. 308 KB heap free after setup (Wokwi) |
+| Simulator | Wokwi: 16.3 fps (was 4.8 at 320×240). Wokwi runs slower than real time; the hardware rate is measured in Phase 1 |
 | Uptime | Task watchdog (5 s), no heap allocation after setup |
 
 ## 9. Hardware
@@ -166,11 +168,11 @@ The defaults below are the values from the final prototype. Field **order** matt
 |---|---|---|
 | SPI SCLK | 12 | |
 | SPI MOSI | 11 | |
-| SPI MISO | 13 | Reserved (SD card later) |
-| TFT CS | 10 | |
-| TFT DC | 9 | |
-| TFT RST | 14 | |
-| TFT backlight | 21 | PWM. The OLED has no backlight; brightness is set by panel contrast |
+| SPI MISO | 13 | Not used by the OLED (write-only). Reserved (SD card later) |
+| Display CS | 10 | |
+| Display DC | 9 | Often labelled D/C or RS |
+| Display RST | 14 | |
+| Backlight | 21 | The simulator's ILI9341 only (PWM). The OLED has no backlight; its brightness is its drive current (contrast) |
 | Feed button (v2) | 4 | Internal pull-up |
 
 GPIO 35–37 are used by the octal PSRAM, and GPIO 0, 3, 45 and 46 are strapping pins. None of them are used.
