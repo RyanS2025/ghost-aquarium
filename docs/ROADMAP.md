@@ -6,12 +6,12 @@ A box is ticked only when the work is merged **and** shown working (a test run, 
 
 Goal: the full tank running in the Wokwi simulator from tested code, before buying any parts.
 
-- [ ] Browser tuning prototype: motion and color settings chosen ([ADR 0007](adr/0007-browser-prototype-first.md))
-- [ ] PlatformIO project with `esp32s3` and `native` environments, and CI running green
-- [ ] `tanksim` library: fish movement, schooling, bubbles, seaweed, fixed timestep, with unit tests
-- [ ] 100,000-step soak test passes: no NaN, no fish escape, same seed gives the same result
-- [ ] Renderer and main loop running in Wokwi, with frame time logged
-- [ ] Wokwi recording added to the README
+- [x] Browser tuning prototype: look settled, device-accurate preview ([ADR 0007](adr/0007-browser-prototype-first.md), [0008](adr/0008-device-render-pipeline-and-budgets.md), [0009](adr/0009-motion-model.md))
+- [x] PlatformIO project with `esp32s3` and `native` environments (CI workflow in place; first GitHub run happens when `phase0` is pushed)
+- [ ] `tanksim` library: fish movement, coming & going, ambient life, seabed, fixed timestep, with unit tests. **Done except schooling** (Task 4, in progress)
+- [x] 100,000-step soak test passes: no NaN, no vertical escapes, facing always correct, away cap exact, same seed gives the same result
+- [x] Renderer and main loop running in Wokwi, with frame time logged (`make sim`; Wokwi emulates slower than real time, so fps is measured on hardware in Phase 1)
+- [x] Wokwi screenshot added to the README (a recording comes with the Phase 1 demo video)
 
 Detailed tasks: [Phase 0 plan](plans/2026-11-14-phase0-sim-and-renderer.md)
 
@@ -35,7 +35,7 @@ Goal: a finished desk piece and a 30-second demo video.
 
 **Enclosure**
 - [ ] Makerspace safety orientation and FDM 3D-printing training
-- [ ] Base designed in CAD: screen pocket, 45° reflector slot, cable exit, matte black interior. Files go in `hardware/`.
+- [x] Base designed in CAD: screen window + bosses, 45° reflector grooves, USB-C notch, dark back wall. Parametric code-CAD + STLs in [`hardware/`](../hardware/) (`make cad`). **Re-check the dimensions against your real display before printing**
 - [ ] Base printed and assembled
 - [ ] Optional: reflector laser-cut from acrylic
 

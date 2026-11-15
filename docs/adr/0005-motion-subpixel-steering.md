@@ -1,6 +1,6 @@
 # 0005. Sub-pixel float motion with steering behaviors and a fixed timestep
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR 0009](0009-motion-model.md): rigid bodies, flip-turns, coming and going.
 - **Date:** 2026-11-14
 
 ## Context

@@ -1,0 +1,5 @@
+# Run the real firmware build in the Wokwi simulator (VS Code: "Wokwi: Start Simulator").
+[wokwi]
+version = 1
+firmware = '.pio/build/esp32s3/firmware.bin'
+elf = '.pio/build/esp32s3/firmware.elf'

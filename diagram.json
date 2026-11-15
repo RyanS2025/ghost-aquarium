@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "author": "Ghost Aquarium",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0, "attrs": { "psramSize": "8", "flashSize": "8" } },
+    { "type": "wokwi-ili9341", "id": "lcd", "top": -60, "left": 240, "rotate": 270, "attrs": {} }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "lcd:VCC", "esp:3V3.1", "red", [] ],
+    [ "lcd:GND", "esp:GND.1", "black", [] ],
+    [ "lcd:CS", "esp:10", "orange", [] ],
+    [ "lcd:RST", "esp:14", "purple", [] ],
+    [ "lcd:D/C", "esp:9", "green", [] ],
+    [ "lcd:MOSI", "esp:11", "blue", [] ],
+    [ "lcd:SCK", "esp:12", "yellow", [] ],
+    [ "lcd:LED", "esp:21", "white", [] ],
+    [ "lcd:MISO", "esp:13", "gray", [] ]
+  ],
+  "dependencies": {}
+}

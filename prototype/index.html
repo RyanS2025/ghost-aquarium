@@ -1,0 +1,1434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost Aquarium Tuner</title>
+<!--
+  Ghost Aquarium tuning prototype (ADR 0007), look v3:
+  smooth turns (turn-rate limit, body bend limit, turn animation), body-aware spacing,
+  and a vibrant scene (water glow with black edges, light rays, ASCII reef, bioluminescence).
+  A JS stand-in for the motion model; lib/tanksim (C++) becomes the source of truth after export.
+  Single file, no build step, no external libraries.
+-->
+<style>
+  :root {
+    --bg: #06080c; --panel: #0c1017; --line: #1a2230; --text: #c9d4e3;
+    --muted: #6b7a90; --accent: #ff4fd8; --accent2: #3fe0ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header { padding: 18px 16px 0; text-align: center; }
+  header h1 {
+    margin: 0; font-size: 15px; letter-spacing: .12em;
+    background: linear-gradient(90deg, var(--accent2), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main { display: flex; flex-wrap: wrap; gap: 24px; padding: 18px 16px 32px; justify-content: center; align-items: flex-start; }
+  .stage { display: flex; flex-direction: column; gap: 10px; align-items: center; min-width: 0; }
+  .glass {
+    padding: 14px; border: 1px solid var(--line); border-radius: 6px;
+    background: linear-gradient(180deg, #0a0e15, #040507);
+    box-shadow: 0 0 80px rgba(63, 224, 255, .05), 0 0 120px rgba(255, 79, 216, .04);
+  }
+  canvas {
+    display: block; width: 960px; max-width: calc(100vw - 64px); aspect-ratio: 4 / 3;
+    background: #000; cursor: crosshair; touch-action: manipulation;
+  }
+  canvas.pixel { image-rendering: pixelated; }
+  canvas.mirror { transform: scaleX(-1); }
+  .hud { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); justify-content: center; }
+  .hud b { color: var(--text); font-weight: normal; }
+  .hint { color: var(--accent2); }
+  aside {
+    width: 380px; max-width: 100%; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 14px; max-height: calc(100vh - 40px); overflow: auto;
+  }
+  fieldset { border: 1px solid var(--line); border-radius: 4px; margin: 0 0 12px; padding: 6px 10px 8px; }
+  legend { color: var(--accent2); padding: 0 4px; }
+  fieldset.fx legend { color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 120px 48px; gap: 8px; align-items: center; margin: 3px 0; }
+  .row label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row output { text-align: right; color: var(--muted); }
+  .pal { display: grid; grid-template-columns: 1fr 34px 34px 70px; gap: 6px; align-items: center; margin: 3px 0; }
+  .pal input[type=color], .row input[type=color] { width: 34px; height: 22px; border: 1px solid var(--line); background: none; padding: 0; }
+  .swatch { height: 10px; border-radius: 5px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  label.check { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+  button {
+    background: #151d28; color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  textarea {
+    width: 100%; height: 300px; background: #040507; color: #9fd8ff; border: 1px solid var(--line);
+    border-radius: 4px; font: 11px/1.35 ui-monospace, Menlo, monospace; padding: 8px; resize: vertical;
+  }
+  #copied { color: var(--accent); min-height: 1.4em; }
+  .note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GHOST AQUARIUM · TUNER</h1>
+  <p>320×240 logical · tune by feel, then “Copy as C++”</p>
+</header>
+<main>
+  <section class="stage">
+    <div class="glass"><canvas id="tank"></canvas></div>
+    <div class="hud">
+      <span class="hint">tap the tank to make a splash</span>
+      <span>fps <b id="fps">–</b></span>
+      <span>fish <b id="nfish">–</b></span>
+      <span>particles <b id="npart">–</b></span>
+      <span>chars/frame <b id="nglyph">–</b></span>
+      <span>px writes/frame <b id="npx">–</b></span>
+      <span>seed <b id="seed">–</b></span>
+    </div>
+  </section>
+  <aside>
+    <fieldset>
+      <legend>View</legend>
+      <label class="check"><input type="checkbox" id="device" checked> Device preview: what the ESP32 + ILI9341 will show (320×240, RGB565, 6×8 bitmap font, 30 fps)</label>
+      <label class="check"><input type="checkbox" id="mirror"> Mirror (how it looks on the reflector)</label>
+      <label class="check"><input type="checkbox" id="drawn"> Drawn fish &amp; rocks instead of ASCII (experiment)</label>
+      <div class="btns">
+        <button id="leap">Make a fish leap</button>
+        <button id="reseed">Reseed</button>
+        <button id="reset">Reset defaults</button>
+      </div>
+      <p class="note">On the real reflector every lit pixel is visible. Background glow fades to black at the edges so the screen outline never shows; lower “bgGlow” for a cleaner ghost.</p>
+    </fieldset>
+    <div id="controls"></div>
+    <fieldset>
+      <legend>Fish palettes (head → tail)</legend>
+      <div id="palettes"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Scene colors</legend>
+      <div id="colors"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Export</legend>
+      <div class="btns"><button id="copy">Copy as C++</button></div>
+      <div id="copied"></div>
+      <textarea id="export" readonly spellcheck="false"></textarea>
+    </fieldset>
+  </aside>
+</main>
+<script>
+"use strict";
+
+// ================================================================ constants
+const W = 320, H = 240;
+const STEP = 1 / 60, MAX_STEPS = 5;           // fixed 60 Hz, ≤5 catch-up steps
+const SURFACE_Y = 20;                         // water line (logical px)
+const GRAVITY = 170;                          // px/s² above water and for droplets
+const LAYER_NAMES = ["Far", "Mid", "Near"];
+const SPECIES = [                              // species index == layer in v1
+  { right: "><>",      left: "<><" },
+  { right: "><('>",    left: "<')><" },
+  { right: "><((('>",  left: "<')))><" },
+];
+const FONT_SCALE = [1, 1.5, 2];               // LovyanGFX setTextSize per layer, built-in 6×8 font
+const CELL_W = 6, CELL_H = 8;                 // 5×7 glyph inside a 6×8 character cell
+const FONT_PX = FONT_SCALE.map((s) => s * CELL_H);   // smooth-preview font sizes
+const ADV = FONT_SCALE.map((s) => s * CELL_W);       // character advance (px)
+const BODY_SPACE = [0.7, 1.0, 1.35];          // separation scales with body size per layer
+// Hardware budgets (ESP32-S3): bounded pools, preallocated in firmware, no per-frame allocation.
+const MAX_PARTICLES = 96, MAX_RIPPLES = 12, BUBBLE_CAP = 24;
+const SEAWEED_COUNT = 4, SEAWEED_SEG_PX = CELL_H, PLANKTON = 32;
+const TAU = Math.PI * 2;
+const HOME_MIN = SURFACE_Y + 32, HOME_MAX = H - 48;   // fish stay above the reef
+
+// Core fields: ORDER MUST match struct tank::Tuning in lib/tanksim/tuning.h.
+// fx:true fields are new (look v2/v3) and export as a separate draft block.
+const FIELDS = [
+  { k: "maxSpeed",         g: "Motion",    def: [16, 26, 38], min: 2, max: 90, step: 1, sub: LAYER_NAMES },
+  { k: "maxForce",         g: "Motion",    def: 40,  min: 2,  max: 150, step: 1 },
+  { k: "neighborRadius",   g: "Schooling", def: 60,  min: 4,  max: 140, step: 1 },
+  { k: "separationRadius", g: "Schooling", def: 26,  min: 2,  max: 80,  step: 1 },
+  { k: "cohesionWeight",   g: "Schooling", def: 0.35, min: 0, max: 4,   step: 0.05 },
+  { k: "alignmentWeight",  g: "Schooling", def: 1.0, min: 0,  max: 4,   step: 0.05 },
+  { k: "separationWeight", g: "Schooling", def: 2.2, min: 0,  max: 5,   step: 0.05 },
+  { k: "wanderWeight",     g: "Wander & edges", def: 0.6, min: 0, max: 3,  step: 0.05 },
+  { k: "wanderJitter",     g: "Wander & edges", def: 1.6, min: 0, max: 12, step: 0.1 },
+  { k: "edgeMargin",       g: "Wander & edges", def: 36,  min: 4, max: 80, step: 1 },
+  { k: "edgeWeight",       g: "Wander & edges", def: 2.8, min: 0, max: 8,  step: 0.1 },
+  { k: "facingThreshold",  g: "Wander & edges", def: 2,   min: 0, max: 15, step: 0.5 },
+  { k: "fishPerLayer",     g: "Population", def: [5, 4, 3], min: 0, max: 20, step: 1, sub: LAYER_NAMES, int: true, respawn: true },
+  { k: "bubblesPerSec",    g: "Bubbles",   def: 1.0, min: 0,  max: 10,  step: 0.1 },
+  { k: "bubbleRise",       g: "Bubbles",   def: 25,  min: 2,  max: 80,  step: 1 },
+  { k: "bubbleWobbleAmp",  g: "Bubbles",   def: 2,   min: 0,  max: 10,  step: 0.25 },
+  { k: "bubbleWobbleHz",   g: "Bubbles",   def: 1.2, min: 0,  max: 5,   step: 0.05 },
+  { k: "seaweedSwayAmp",   g: "Seaweed",   def: 7,   min: 0,  max: 20,  step: 0.5 },
+  { k: "seaweedHz",        g: "Seaweed",   def: [0.31, 0.83], min: 0, max: 2, step: 0.01, sub: ["slow", "fast"] },
+  // ---- new fields (draft; DESIGN update pending)
+  { k: "maxTurnRate",      g: "Turning", fx: true, def: 1.6,  min: 0.5, max: 8,  step: 0.1 },
+  { k: "maxTilt",          g: "Turning", fx: true, def: 8,   min: 0,   max: 35, step: 1 },
+  { k: "turnTime",         g: "Turning", fx: true, def: 0.4,  min: 0.1, max: 1.2, step: 0.05 },
+  { k: "flipAngle",        g: "Turning", fx: true, def: 100,  min: 60,  max: 180, step: 5 },
+  { k: "maxPitch",         g: "Turning", fx: true, def: 25,   min: 15,  max: 85,  step: 1 },
+  { k: "returnDelayMin",   g: "Coming & going", fx: true, def: 2,    min: 0,   max: 20, step: 0.5 },
+  { k: "returnDelayMax",   g: "Coming & going", fx: true, def: 7,    min: 0,   max: 30, step: 0.5 },
+  { k: "maxAwayFrac",      g: "Coming & going", fx: true, def: 0.35, min: 0,   max: 0.8, step: 0.05 },
+  { k: "minSpeedFrac",     g: "Turning", fx: true, def: 0.3,  min: 0,   max: 0.8, step: 0.05 },
+  { k: "bodyWaveAmp",      g: "Flow", fx: true, def: 0.8,  min: 0, max: 6,   step: 0.1 },
+  { k: "bodyWaveHz",       g: "Flow", fx: true, def: 1.4,  min: 0, max: 5,   step: 0.05 },
+  { k: "levelPull",        g: "Flow", fx: true, def: 0.7,  min: 0, max: 3,   step: 0.05 },
+  { k: "depthPull",        g: "Flow", fx: true, def: 0.8,  min: 0, max: 2,   step: 0.05 },
+  { k: "layerSpacing",     g: "Flow", fx: true, def: 0.4,  min: 0, max: 2,   step: 0.05 },
+  { k: "vibrance",         g: "Color", fx: true, def: 1.0, min: 0, max: 1.6, step: 0.05 },
+  { k: "shimmer",          g: "Color", fx: true, def: 0.12, min: 0, max: 0.4, step: 0.01 },
+  { k: "bgGlow",           g: "Background", fx: true, def: 0.9, min: 0, max: 1.5, step: 0.05, rebuildBg: true },
+  { k: "rays",             g: "Background", fx: true, def: 0.7, min: 0, max: 1.5, step: 0.05 },
+  { k: "reef",             g: "Background", fx: true, def: 1,   min: 0, max: 1,   step: 1, int: true },
+  { k: "dartPerSec",       g: "Splashes", fx: true, def: 0.015, min: 0, max: 0.3, step: 0.005 },
+  { k: "leapPerSec",       g: "Splashes", fx: true, def: 0.08, min: 0, max: 1,   step: 0.01 },
+  { k: "splashDroplets",   g: "Splashes", fx: true, def: 16,   min: 0, max: 48,  step: 1, int: true },
+];
+
+const DEFAULT_PALETTES = [                    // vibrant tropical, [head, tail]
+  ["#00f0ff", "#ff2d55"],  // neon tetra
+  ["#ff2bd6", "#7a3cff"],  // betta
+  ["#ffd400", "#ff5a00"],  // goldfish
+  ["#ff8c00", "#fff1d6"],  // clownfish
+  ["#b6ff00", "#00d5a0"],  // lime / teal
+  ["#ff5e7a", "#ffc46b"],  // coral
+  ["#5ad1ff", "#b07bff"],  // sky / lilac
+];
+const DEFAULT_SCENE = {
+  waterTop: "#0aa6c9", waterMid: "#2340b8", waterDeep: "#5a1a9a", ray: "#7fe8ff",
+  seaweedBase: "#0d5c3a", seaweedTip: "#7dff6a", sand: "#d9a35f", rock: "#5b5394",
+  bubble: "#9fe8ff", surface: "#2fd0ff",
+};
+const REEF_COLORS = ["#ff3d9a", "#ff7a1a", "#a64dff", "#ffd23f", "#22e3ff", "#ff3355", "#9dff3a"];
+const CORAL = [                               // bottom-aligned ASCII templates
+  { flex: true,  rows: [" \\|/ ", "\\ Y /", " \\|/ ", "  |  "] },             // branch coral
+  { flex: true,  rows: ["}{}{}", "{}{}{", " }|{ ", "  |  "] },                // sea fan
+  { flex: true,  rows: ["\\\\|//", " \\|/ ", " (_) "], glow: true },          // anemone
+  { flex: false, rows: [" @@@ ", "@@@@@"] },                                 // brain coral
+  { flex: false, rows: ["o    ", "| o  ", "| | o", "|_|_|"] },               // tube sponges
+];
+// Real fish, drawn from shapes in fish-local coordinates (nose at origin, +x forward).
+const FISH_SHAPE = [            // per depth layer: body length, half-height, tail length, fin scale
+  { L: 13, H: 3.4, T: 5,  fin: 0.8 },
+  { L: 19, H: 5.6, T: 7,  fin: 1.0 },
+  { L: 27, H: 9.0, T: 10, fin: 1.25 },
+];
+const LOOKS = ["tetra", "betta", "goldfish", "clown", "spots", "stripes", "tang"];   // per palette index
+const ROCK_TONES = ["scene", "#4d6b86", "#7a4b3a"];   // scene rock color, blue-grey, warm red-brown
+let asciiStyle = true;                                // the project's look; drawn style is an experiment
+const fishLen = (L) => (asciiStyle ? SPECIES[L].right.length * ADV[L] : FISH_SHAPE[L].L + FISH_SHAPE[L].T);
+
+// ================================================================ state
+const STORE_KEY = "ghost-aquarium-tuner-v5";
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const defaultsT = () => Object.fromEntries(FIELDS.map((f) => [f.k, clone(f.def)]));
+let T = defaultsT(), palettes = clone(DEFAULT_PALETTES), scene = clone(DEFAULT_SCENE), seed = 42;
+try {
+  const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+  if (s) { T = Object.assign(defaultsT(), s.T); palettes = s.palettes || palettes; scene = Object.assign(clone(DEFAULT_SCENE), s.scene); seed = s.seed ?? seed; }
+} catch (_) { /* storage unavailable: defaults */ }
+const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify({ T, palettes, scene, seed })); } catch (_) {} };
+
+// ================================================================ math + color
+const v = (x = 0, y = 0) => ({ x, y });
+const len = (a) => Math.hypot(a.x, a.y);
+const norm = (a) => { const l = len(a); return l < 1e-6 ? v() : v(a.x / l, a.y / l); };
+const limit = (a, m) => { const l = len(a); return l > m && l > 0 ? v(a.x / l * m, a.y / l * m) : a; };
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const wrapAngle = (a) => ((((a + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+
+class Rng {                                    // xorshift32, same as tank::Rng
+  constructor(s) { this.s = (s >>> 0) || 0x9E3779B9; }
+  next() { let x = this.s; x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; this.s = x; return x; }
+  uniform(lo, hi) { return lo + (hi - lo) * ((this.next() >>> 8) / 16777216); }
+  int(n) { return Math.floor(this.uniform(0, n)); }
+}
+
+const hexToRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+function hexToHsl(hex) {
+  const [R, G, B] = hexToRgb(hex), r = R / 255, g = G / 255, b = B / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+const lerpHue = (a, b, t) => { const d = ((b - a + 540) % 360) - 180; return (a + d * t + 360) % 360; };
+const hsl = (h, s, l, a = 1) => `hsla(${h.toFixed(1)},${(clamp(s, 0, 1) * 100).toFixed(1)}%,${(clamp(l, 0, 1) * 100).toFixed(1)}%,${a.toFixed(3)})`;
+
+// Depth grading: far fish are darker, less saturated and pulled toward deep blue.
+const DEPTH = [
+  { l: 0.55, s: 0.80, blue: 0.30 },
+  { l: 0.80, s: 0.92, blue: 0.10 },
+  { l: 1.00, s: 1.00, blue: 0.00 },
+];
+
+// ================================================================ simulation
+function shuffled(rng, n) { const a = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = rng.int(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function makeTank(s) {
+  const rng = new Rng(s);
+  const fish = [];
+  let id = 0;
+  for (let L = 0; L < 3; L++) {
+    const cnt = T.fishPerLayer[L], slots = shuffled(rng, cnt);
+    for (let i = 0; i < cnt; i++) {
+      // stratified preferred depths: each fish in a layer gets its own band, so they spread out
+      const homeBase = HOME_MIN + (slots[i] + 0.5) / Math.max(1, cnt) * (HOME_MAX - HOME_MIN) + rng.uniform(-8, 8);
+      const a = rng.uniform(-0.4, 0.4) + (rng.uniform(0, 1) < 0.5 ? 0 : Math.PI), sp = T.maxSpeed[L] * 0.6;
+      fish.push({
+        id: id++, layer: L, pal: rng.int(palettes.length),
+        pos: v(rng.uniform(T.edgeMargin, W - T.edgeMargin), clamp(homeBase, HOME_MIN, HOME_MAX)),
+        vel: v(Math.cos(a) * sp, Math.sin(a) * sp),
+        wanderAngle: a, facingRight: Math.cos(a) > 0, wavePhase: rng.uniform(0, TAU),
+        boostT: 0, leapT: 0, airborne: false, body: [], tilt: 0,
+        homeBase, homeY: homeBase, turnP: 0, flipTurn: false, turnSwapped: false,
+      });
+    }
+  }
+  // Seabed layout: rocks, seaweed and coral never overlap (overlapping ASCII pieces read as a
+  // jumble of punctuation). Shuffle the pieces, then pack them left→right with even gaps:
+  // overlap is impossible by construction, and the arrangement still differs per seed.
+  const bed = [];
+  for (const [w0, h0] of [[60, 28], [40, 20], [24, 12], [14, 7]]) {
+    const w = w0 * rng.uniform(0.85, 1.15), h = h0 * rng.uniform(0.85, 1.2);
+    bed.push({ kind: "rock", half: w / 2, w, h });
+  }
+  for (let i = 0; i < SEAWEED_COUNT; i++) bed.push({ kind: "weed", half: 4 });
+  for (let i = 0; i < 3; i++) bed.push({ kind: "coral", half: 15 });   // 5 chars × 6 px
+  for (let i = bed.length - 1; i > 0; i--) { const j = rng.int(i + 1); [bed[i], bed[j]] = [bed[j], bed[i]]; }
+  const used = bed.reduce((a, b) => a + 2 * b.half, 0);
+  const gap = Math.max(0, (W - 4 - used) / (bed.length + 1));
+  let cursor = 2 + gap;
+  const rocks = [], seaweed = [], reef = [];
+  for (const b of bed) {
+    const x = cursor + b.half + rng.uniform(-0.35, 0.35) * gap;
+    cursor += 2 * b.half + gap;
+    if (b.kind === "rock") rocks.push(makeRock(rng, x, b.w, b.h));
+    else if (b.kind === "weed") seaweed.push({ x, height: rng.uniform(50, 105), phase: rng.uniform(0, TAU), tint: rng.uniform(0, 1) });
+    else { const tpl = CORAL[rng.int(CORAL.length)]; reef.push({ x, rows: tpl.rows, flex: tpl.flex, glow: !!tpl.glow, color: REEF_COLORS[rng.int(REEF_COLORS.length)], phase: rng.uniform(0, TAU) }); }
+  }
+  rocks.sort((a, b) => b.h - a.h);             // big ones first
+  rocks[0].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
+  if (rng.uniform(0, 1) < 0.6) rocks[1].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
+  const plankton = [];
+  for (let i = 0; i < PLANKTON; i++) {
+    plankton.push({ pos: v(rng.uniform(0, W), rng.uniform(SURFACE_Y, H)), vel: v(rng.uniform(-3, 3), rng.uniform(-2, 2)), phase: rng.uniform(0, TAU), color: rng.uniform(0, 1) < 0.5 ? "#4fe9ff" : REEF_COLORS[rng.int(REEF_COLORS.length)] });
+  }
+  const sand = [];
+  for (let x = 3; x < W; x += CELL_W) sand.push({ x: x + rng.uniform(-1, 1), y: H - 2 - rng.uniform(0, 3), ch: [",", ".", "`", "."][rng.int(4)], pebble: rng.uniform(0, 1) < 0.08 ? REEF_COLORS[rng.int(REEF_COLORS.length)] : null });
+  const rays = [];
+  for (let i = 0; i < 4; i++) rays.push({ x: W * (0.15 + 0.7 * i / 3) + rng.uniform(-20, 20), w: rng.uniform(14, 30), slant: rng.uniform(25, 55), phase: rng.uniform(0, TAU) });
+  return { rng, fish, seaweed, plankton, reef, rocks, sand, rays, bubbles: [], particles: [], ripples: [], time: 0, bubbleAcc: 0 };
+}
+
+// An irregular boulder: a jittered half-ellipse sitting on the sand (local y is up-negative).
+function makeRock(rng, x, w, h) {
+  const n = 11, pts = [];
+  for (let k = 0; k <= n; k++) {
+    const a = Math.PI + Math.PI * k / n, j = k === 0 || k === n ? 1 : rng.uniform(0.8, 1.08);
+    pts.push(v(Math.cos(a) * w / 2 * j, Math.min(0, Math.sin(a) * h * j)));
+  }
+  const moss = [], specks = [];
+  for (let k = 2; k < n - 1; k++) if (pts[k].y < -h * 0.6 && rng.uniform(0, 1) < 0.4) moss.push({ x: pts[k].x, y: pts[k].y + 1.2, r: rng.uniform(1.5, 3) });
+  for (let k = 0; k < 6; k++) specks.push({ x: rng.uniform(-w * 0.3, w * 0.3), y: rng.uniform(-h * 0.65, -h * 0.12), r: rng.uniform(0.4, 0.9) });
+
+  // ASCII version: a character grid filling the outline. Top-edge characters follow the
+  // slope (/ rising, \ falling, - flat), the sides close with ( ), the inside is a dense
+  // stone texture, and some flat top cells grow moss.
+  const CW = CELL_W, CHH = CELL_H, cells = [];
+  const topAt = (x) => {
+    for (let k = 0; k < pts.length - 1; k++) {
+      const a = pts[k], b = pts[k + 1];
+      if (a.x !== b.x && (x - a.x) * (x - b.x) <= 0) return a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
+    }
+    return 0;
+  };
+  for (let cx = -w / 2 + CW / 2; cx < w / 2; cx += CW) {
+    const slope = (topAt(cx + 1.5) - topAt(cx - 1.5)) / 3;
+    const rows = Math.max(1, Math.round(-topAt(cx) / CHH));
+    for (let r = 0; r < rows; r++) {
+      const top = r === rows - 1, edgeL = cx < -w / 2 + CW, edgeR = cx > w / 2 - CW;
+      let ch;
+      if (top) ch = slope < -0.45 ? "/" : slope > 0.45 ? "\\" : "-";
+      else if (edgeL) ch = "(";
+      else if (edgeR) ch = ")";
+      else { const q = rng.uniform(0, 1); ch = q < 0.7 ? "#" : q < 0.88 ? "%" : ":"; }   // calm, mostly-solid stone
+      cells.push({ x: cx, y: -CHH * (r + 0.5), ch, top, moss: top && Math.abs(slope) < 0.6 && rng.uniform(0, 1) < 0.35 });
+    }
+  }
+  return { x, w, h, pts, moss, specks, cells, star: null, tone: ROCK_TONES[rng.int(ROCK_TONES.length)], lMul: rng.uniform(0.85, 1.2), hueShift: rng.uniform(-12, 12), starRot: rng.uniform(0, TAU) };
+}
+
+// Body sample points used for spacing between fish (matches the drawn length).
+function bodyPoints(f) {
+  const L = f.layer;
+  return asciiStyle ? rigidBody(f, SPECIES[L].right.length, ADV[L]) : rigidBody(f, 5, fishLen(L) / 4);
+}
+
+function steerEdges(f) {
+  const m = T.edgeMargin, k = T.edgeWeight * T.maxForce;
+  const fac = (d) => (d < 0 ? 1 : clamp((m - d) / m, 0, 1));
+  const top = f.leapT > 0 ? 0 : fac(f.pos.y - SURFACE_Y);   // a leaping fish ignores the surface
+  // Side walls only apply when this fish may not leave right now (see "coming & going").
+  const side = f.sideWalls ? fac(f.pos.x) * k - fac(W - f.pos.x) * k : 0;
+  return v(side, top * k - fac(H - 30 - f.pos.y) * k);
+}
+
+// Reynolds wander: a point on a small circle projected AHEAD of the fish drifts randomly;
+// the fish steers toward it. The target stays within ±~30° of the heading, so wander makes
+// the fish meander but never asks it to turn around (a world-space wander direction did,
+// which caused constant reversals).
+const WANDER_AHEAD = 2, WANDER_RADIUS = 1;
+function steerWander(f, rng, dt) {
+  f.wanderAngle += rng.uniform(-1, 1) * T.wanderJitter * dt;
+  const h = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
+  const ca = Math.cos(f.wanderAngle), sa = Math.sin(f.wanderAngle);
+  const target = v(h.x * WANDER_AHEAD + (h.x * ca - h.y * sa) * WANDER_RADIUS, h.y * WANDER_AHEAD + (h.y * ca + h.x * sa) * WANDER_RADIUS);
+  const u = norm(target), m = T.wanderWeight * T.maxForce;
+  return v(u.x * m, u.y * m);
+}
+
+// Nearest point of another fish's body to point p (falls back to its head).
+function nearestOnBody(o, p) {
+  let best = o.pos, bd = Infinity;
+  for (const q of (o.body.length ? o.body : [o.pos])) { const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; best = q; } }
+  return best;
+}
+
+// One possible schooling rule, just for tuning. The C++ version is written separately (plan Task 4).
+// Separation is measured to the nearest point of each neighbour's BODY, scaled by body size,
+// so long fish keep real clearance instead of swimming through each other.
+function steerSchool(f, all) {
+  const sep = v(), avgVel = v(), center = v();
+  let n = 0;
+  const sepR = T.separationRadius * BODY_SPACE[f.layer];
+  for (const o of all) {
+    if (o === f || o.airborne || o.away) continue;
+    const q = nearestOnBody(o, f.pos);
+    const dx = f.pos.x - q.x, dy = f.pos.y - q.y, d = Math.hypot(dx, dy);
+    if (o.layer !== f.layer) {                 // light cross-layer spacing reduces visual clutter
+      const r = sepR * 0.7;
+      if (d < r && d > 1e-4) { const w = T.layerSpacing * (r - d) / r / d; sep.x += dx * w; sep.y += dy * w; }
+      continue;
+    }
+    const hd = Math.hypot(f.pos.x - o.pos.x, f.pos.y - o.pos.y);
+    if (hd > T.neighborRadius) continue;
+    n++;
+    avgVel.x += o.vel.x; avgVel.y += o.vel.y; center.x += o.pos.x; center.y += o.pos.y;
+    if (d < sepR && d > 1e-4) { const w = (sepR - d) / sepR / d; sep.x += dx * w; sep.y += dy * w; }
+  }
+  const ms = T.maxSpeed[f.layer];
+  const seek = (dir) => { const u = norm(dir); return len(u) === 0 ? v() : v(u.x * ms - f.vel.x, u.y * ms - f.vel.y); };
+  const s = seek(sep);
+  if (n === 0) return v(T.separationWeight * s.x, T.separationWeight * s.y);
+  const a = seek(v(avgVel.x / n, avgVel.y / n)), c = seek(v(center.x / n - f.pos.x, center.y / n - f.pos.y));
+  return v(T.separationWeight * s.x + T.alignmentWeight * a.x + T.cohesionWeight * c.x,
+           T.separationWeight * s.y + T.alignmentWeight * a.y + T.cohesionWeight * c.y);
+}
+
+// ---------------------------------------------------------------- body
+// ASCII fish only read as fish when their characters sit in ONE straight, evenly spaced row.
+// (Bending the text along the swim path measured -22°..+47° across a single body and turned
+// fish into scattered punctuation.) So the body is rigid: a row behind the head, tilted by a
+// smoothed, small "visual pitch". `squeeze` shortens it around its middle for flip-turns.
+function rigidBody(f, n, spacing, squeeze = 1) {
+  const back = f.facingRight ? -1 : 1, tilt = Math.tan(f.tilt || 0);
+  const pts = [];
+  for (let j = 0; j < n; j++) pts.push(v(f.pos.x + back * j * spacing, f.pos.y - j * spacing * tilt));
+  if (squeeze === 1) return pts;
+  const mid = pts[(n - 1) >> 1];
+  return pts.map((p) => v(mid.x + (p.x - mid.x) * squeeze, mid.y + (p.y - mid.y) * squeeze));
+}
+
+// ---------------------------------------------------------------- particles + splashes
+function emit(tk, p) { if (tk.particles.length < MAX_PARTICLES) tk.particles.push(p); }
+function ripple(tk, x, amp) { if (tk.ripples.length >= MAX_RIPPLES) tk.ripples.shift(); tk.ripples.push({ x, t0: tk.time, amp }); }
+function surfaceAt(tk, x) {
+  let y = SURFACE_Y + 1.2 * Math.sin(x * 0.07 + tk.time * 1.3) + 0.6 * Math.sin(x * 0.19 - tk.time * 0.9);
+  for (const r of tk.ripples) {
+    const age = tk.time - r.t0, d = Math.abs(x - r.x);
+    if (d < 70 * age) y += r.amp * Math.exp(-age * 1.1) * Math.exp(-d * 0.018) * Math.sin(0.28 * d - 8 * age);
+  }
+  return y;
+}
+function fishColorHead(f) { return palettes[f.pal % palettes.length][0]; }
+
+function splash(tk, x, strength, color) {
+  const rng = tk.rng, s = clamp(strength / 60, 0.4, 1.6);
+  const n = Math.round(T.splashDroplets * s);
+  for (let i = 0; i < n; i++) {
+    emit(tk, { kind: "drop", pos: v(x + rng.uniform(-5, 5), SURFACE_Y - 1), vel: v(rng.uniform(-38, 38) * s, -rng.uniform(35, 85) * s),
+               life: rng.uniform(0.7, 1.3), max: 1.3, color: rng.uniform(0, 1) < 0.35 ? color : scene.bubble, ch: rng.uniform(0, 1) < 0.5 ? "'" : "." });
+  }
+  for (let i = 0; i < Math.round(6 * s); i++) {
+    emit(tk, { kind: "spark", pos: v(x + rng.uniform(-8, 8), SURFACE_Y + rng.uniform(-2, 2)), vel: v(rng.uniform(-25, 25), rng.uniform(-10, 10)),
+               life: rng.uniform(0.25, 0.5), max: 0.5, color: "#ffffff", ch: "*" });
+  }
+  for (let i = 0; i < Math.round(5 * s); i++) {
+    emit(tk, { kind: "bubble", pos: v(x + rng.uniform(-6, 6), SURFACE_Y + rng.uniform(4, 14)), vel: v(rng.uniform(-6, 6), rng.uniform(5, 25)),
+               life: rng.uniform(0.8, 1.6), max: 1.6, color: scene.bubble, ch: rng.uniform(0, 1) < 0.5 ? "o" : "." });
+  }
+  ripple(tk, x, 3.2 * s);
+}
+
+function burst(tk, x, y) {                      // tap underwater: sparkles + scatter nearby fish
+  const rng = tk.rng;
+  for (let i = 0; i < 26; i++) {
+    const a = rng.uniform(0, TAU), sp = rng.uniform(20, 75);
+    const pal = palettes[rng.int(palettes.length)];
+    emit(tk, { kind: "spark", pos: v(x, y), vel: v(Math.cos(a) * sp, Math.sin(a) * sp), life: rng.uniform(0.5, 1.1), max: 1.1,
+               color: pal[rng.int(2)], ch: rng.uniform(0, 1) < 0.5 ? "*" : "+" });
+  }
+  for (let i = 0; i < 6; i++) emit(tk, { kind: "bubble", pos: v(x + rng.uniform(-4, 4), y), vel: v(rng.uniform(-8, 8), -rng.uniform(10, 30)), life: 2, max: 2, color: scene.bubble, ch: "o" });
+  for (const f of tk.fish) {
+    const d = v(f.pos.x - x, f.pos.y - y), dist = len(d);
+    if (dist < 75 && !f.airborne && !f.away) f.flee = dist < 1e-3 ? v(1, 0) : norm(d), f.boostT = 0.8;   // turn away fast, not instantly
+  }
+}
+
+// Only fish near the surface and away from the side walls leap. Exit speed is fixed, so the
+// arc tops out ~30px above the water (v²/2g) and the fish lands back inside the tank.
+const LEAP_VY = 100, LEAP_X_MIN = 70, LEAP_X_MAX = W - 70;
+function startLeap(tk, f) {
+  const ms = T.maxSpeed[f.layer];
+  const dir = f.vel.x >= 0 ? 1 : -1;           // keep its direction: no glyph swap mid-leap
+  f.leapT = 2.2; f.boostT = 1.2;
+  f.vel = v(dir * ms * 1.1, -LEAP_VY);
+}
+
+function tryAutoLeap(tk) {
+  // only fish near the surface, away from the side walls, already heading toward the middle
+  const cands = tk.fish.filter((f) => f.layer > 0 && !f.away && !f.crossing && !f.airborne && f.leapT <= 0 && f.turnP === 0 &&
+    f.pos.y < SURFACE_Y + 70 && f.pos.x > LEAP_X_MIN && f.pos.x < LEAP_X_MAX && (f.pos.x < W / 2) === (f.vel.x > 0));
+  if (cands.length) startLeap(tk, cands[tk.rng.int(cands.length)]);
+}
+
+// A fish that swam out of view comes back from a random side, at the entry depth with the
+// most open water, sometimes in a new color (reads as a different fish).
+function reenter(tk, f) {
+  const rng = tk.rng, L = f.layer, bodyLen = fishLen(L);
+  const fromLeft = rng.uniform(0, 1) < 0.5, edgeX = fromLeft ? 0 : W;
+  let bestY = HOME_MIN, bestD = -1;
+  for (let k = 0; k < 6; k++) {
+    const y = rng.uniform(HOME_MIN, HOME_MAX);
+    let d = Infinity;
+    for (const o of tk.fish) if (o !== f && !o.away && o.layer === L) d = Math.min(d, Math.hypot(edgeX - o.pos.x, y - o.pos.y));
+    if (d > bestD) { bestD = d; bestY = y; }
+  }
+  const sp = T.maxSpeed[L] * rng.uniform(0.55, 0.8);
+  Object.assign(f, {
+    pos: v(fromLeft ? -bodyLen + 2 : W + bodyLen - 2, bestY), vel: v(fromLeft ? sp : -sp, 0),
+    facingRight: fromLeft, tilt: 0, turnP: 0, flipTurn: false, boostT: 0, leapT: 0, flee: null,
+    homeBase: bestY, homeY: bestY, wanderAngle: 0, reverseT: 0, flipCooldown: 2,
+    away: false, crossing: true, leaving: false,
+  });
+  if (rng.uniform(0, 1) < 0.5) f.pal = rng.int(palettes.length);
+  f.body = bodyPoints(f);
+}
+
+// ---------------------------------------------------------------- step
+function step(tk, dt) {
+  const rng = tk.rng;
+  // 1) forces from one snapshot (order-independent)
+  // Coming & going: fish may swim out the sides while fewer than maxAwayFrac are gone
+  // (counting fish already crossing out), so the tank never empties.
+  // Exits are RESERVED: a fish entering the side margin heading out takes a slot while fewer than
+  // maxAwayFrac are away/committed; fish without a slot see the wall from the full margin.
+  // (Switching walls on for everyone when the cap filled let near-edge fish drift out: 6 away vs cap 4.)
+  const cap = Math.floor(T.maxAwayFrac * tk.fish.length);
+  let committed = tk.fish.filter((f) => f.away || f.leaving).length;
+  for (const f of tk.fish) {
+    if (f.away || f.airborne) continue;
+    const nearL = f.pos.x < T.edgeMargin, nearR = f.pos.x > W - T.edgeMargin;
+    const out = (nearL && f.vel.x < 0) || (nearR && f.vel.x > 0);
+    if (!f.leaving && !f.crossing && out && committed < cap) { f.leaving = true; committed++; }
+    if (f.leaving && !f.crossing && !nearL && !nearR) f.leaving = false;
+    f.sideWalls = !f.leaving && !f.crossing;
+  }
+
+  const edgeFrac = [], nav = [];
+  const forces = tk.fish.map((f, i) => {
+    edgeFrac[i] = 0; nav[i] = v();
+    if (f.away) return v();
+    if (f.airborne) return v(0, GRAVITY);
+    const a = steerSchool(f, tk.fish), b = steerEdges(f), c = steerWander(f, rng, dt);
+    nav[i] = v(b.x + c.x, b.y + c.y);   // "where it wants to go": walls + wander, not neighbours
+    // fish swim level and hold their own drifting depth slot
+    f.homeY = clamp(f.homeY + rng.uniform(-1, 1) * 8 * dt + (f.homeBase - f.homeY) * 0.05 * dt, HOME_MIN, HOME_MAX);
+    const level = v(0, -f.vel.y * T.levelPull * 2 + (f.homeY - f.pos.y) * T.depthPull * 0.5);
+    let fx = a.x + b.x + c.x + level.x, fy = a.y + b.y + c.y + level.y;
+    if (f.flee && f.boostT > 0) {
+      // never flee into a wall: drop the part of the flee that points into a nearby edge
+      let ex = f.flee.x, ey = f.flee.y; const m = T.edgeMargin;
+      if ((f.pos.x < m && ex < 0) || (f.pos.x > W - m && ex > 0)) ex = 0;
+      if ((f.pos.y < SURFACE_Y + m && ey < 0) || (f.pos.y > H - 30 - m && ey > 0)) ey = 0;
+      fx += ex * T.maxForce * 6; fy += ey * T.maxForce * 6;
+      nav[i] = v(nav[i].x + ex * T.maxForce * 6, nav[i].y + ey * T.maxForce * 6);   // a startle may reverse
+    }
+    if (f.leapT > 0) return v(c.x * 0.3, 0);
+    // Wall avoidance has priority: near a wall the other forces are scaled down and the
+    // force budget grows, so a fast fish can actually turn before it leaves the screen.
+    const e = clamp(len(b) / (T.edgeWeight * T.maxForce + 1e-6), 0, 1);
+    edgeFrac[i] = e;
+    const others = limit(v(fx - b.x, fy - b.y), T.maxForce * (f.boostT > 0 ? 4 : 1) * (1 - 0.6 * e));
+    return v(others.x + b.x, others.y + b.y);
+  });
+  // 2) integrate with a turn-rate limit + events
+  tk.fish.forEach((f, i) => {
+    const ms = T.maxSpeed[f.layer];
+    if (f.away) { f.returnT -= dt; if (f.returnT <= 0) reenter(tk, f); return; }
+    if (f.airborne) {
+      f.vel.x += forces[i].x * dt; f.vel.y += forces[i].y * dt;
+    } else {
+      const boosted = f.boostT > 0;
+      const s = limit(forces[i], T.maxForce * (boosted ? 4 : 1) * (1 + 2 * edgeFrac[i]));
+      const want = v(f.vel.x + s.x * dt, f.vel.y + s.y * dt);
+      if (f.leapT > 0) {
+        f.vel = v(want.x, Math.min(want.y, -LEAP_VY * 0.8));   // keep swimming up until it breaks the surface
+      } else {
+        // Heading can only rotate at maxTurnRate: fish swing through wide arcs instead of
+        // reversing on the spot, which is what made bodies fold and contort.
+        const cap = ms * (1 + 1.4 * clamp(f.boostT / 0.7, 0, 1));
+        const curA = Math.atan2(f.vel.y, f.vel.x);
+        const wantA = len(want) > 1e-6 ? Math.atan2(want.y, want.x) : curA;
+        const maxTurn = T.maxTurnRate * (boosted ? 2.2 : 1) * (1 + edgeFrac[i]) * dt;
+        const diff = wrapAngle(wantA - curA);
+        // A full reversal (more than flipAngle, horizontal direction changing) becomes a
+        // flip-turn instead of a tight U-arc: a long body can't wrap around a small circle
+        // without curling into an unreadable column of characters.
+        // Reversals come from NAVIGATION only (walls + wander). Neighbours pushing backward
+        // (separation from the fish ahead) should slow a fish down, not turn it around;
+        // measured: 70% of flips were schooling-triggered before this.
+        const g = nav[i], steerA = Math.atan2(g.y, g.x);
+        const reversing = len(g) > 0.5 * T.maxForce && Math.abs(wrapAngle(steerA - curA)) > T.flipAngle * Math.PI / 180 &&
+                          Math.sign(g.x) !== Math.sign(f.vel.x) && Math.abs(g.x) > 0.3 * len(g);
+        // Debounce + cooldown: the urge to reverse must persist, and a fish that just flipped
+        // won't flip again for a while. Without this, schooling neighbours flip each other back
+        // and forth (each fish's alignment target is a neighbour that just reversed).
+        f.flipCooldown = Math.max(0, (f.flipCooldown || 0) - dt);
+        f.reverseT = reversing ? (f.reverseT || 0) + dt : 0;
+        const canFlip = f.turnP === 0 && (f.flipCooldown === 0 || edgeFrac[i] > 0.3);   // walls override the cooldown
+        const startFlip = () => { f.turnP = 1e-6; f.flipTurn = true; f.turnSwapped = false; f.reverseT = 0; f.flipCooldown = 3.0; };
+        if (canFlip && f.reverseT > 0.25) startFlip();
+        if (f.flipTurn) {
+          // hold heading and slow down while the turn animation plays
+          const spd = Math.max(ms * T.minSpeedFrac * 0.5, len(f.vel) * (1 - 3 * dt));
+          f.vel = v(Math.cos(curA) * spd, Math.sin(curA) * spd);
+        } else {
+          let ang = curA + clamp(diff, -maxTurn, maxTurn);
+          const right = Math.cos(curA) >= 0;
+          // An arc that would cross vertical becomes a flip-turn: arcs are only for gentle
+          // course changes; reversing through an arc curls the body into a column.
+          if ((Math.cos(ang) >= 0) !== right) { if (canFlip) startFlip(); ang = curA; }
+          // Pitch limit: aquarium fish swim mostly level, never straight up or down.
+          const pitchMax = T.maxPitch * Math.PI / 180;
+          const pitch = clamp(right ? wrapAngle(ang) : wrapAngle(Math.PI - ang), -pitchMax, pitchMax);
+          ang = right ? pitch : Math.PI - pitch;
+          const spd = clamp(len(want), ms * T.minSpeedFrac, cap);
+          f.vel = v(Math.cos(ang) * spd, Math.sin(ang) * spd);
+        }
+      }
+    }
+    f.pos.x += f.vel.x * dt; f.pos.y += f.vel.y * dt;
+    f.boostT = Math.max(0, f.boostT - dt); f.leapT = Math.max(0, f.leapT - dt);
+    if (f.boostT === 0) f.flee = null;
+    const speed = len(f.vel);
+    f.wavePhase += TAU * T.bodyWaveHz * (0.4 + 0.9 * clamp(speed / ms, 0, 2.5)) * dt;
+
+    const n = SPECIES[f.layer].right.length;
+
+    // Flip-turn: the ONLY way a fish reverses. Halfway through (body fully foreshortened,
+    // as if turning toward you) it swaps direction; the rigid body simply re-forms on the
+    // other side.
+    if (f.turnP > 0) {
+      f.turnP += dt / T.turnTime;
+      if (!f.turnSwapped && f.turnP >= 0.5) {
+        f.vel.x = -f.vel.x;
+        f.facingRight = f.vel.x > 0;
+        f.wanderAngle = -f.wanderAngle;   // mirror the heading-relative wander too
+        f.turnSwapped = true;
+      }
+      if (f.turnP >= 1) { f.turnP = 0; f.flipTurn = false; }
+    } else if (!f.airborne && Math.abs(f.vel.x) > T.facingThreshold && (f.vel.x > 0) !== f.facingRight) {
+      // safety net: if velocity ever disagrees with the glyph, turn properly (never swap in one frame)
+      f.vel.x = -f.vel.x; f.turnP = 1e-6; f.flipTurn = true; f.turnSwapped = false;
+    }
+
+    // visual tilt follows the swim pitch, smoothed and limited (steeper only mid-leap)
+    const tiltMax = (f.airborne || f.leapT > 0 ? 35 : T.maxTilt) * Math.PI / 180;
+    const tiltTarget = clamp(Math.atan2(f.vel.y, Math.abs(f.vel.x) + 1e-6) * 0.8, -tiltMax, tiltMax);
+    f.tilt = (f.tilt || 0) + (tiltTarget - (f.tilt || 0)) * Math.min(1, dt * 4);
+    f.body = bodyPoints(f);
+
+    // crossing a side edge: leaving fish are "away" once the whole body is out of view;
+    // entering fish ignore side walls until they're fully inside
+    const bodyLen = fishLen(f.layer);
+    if (!f.crossing && !f.airborne && (f.pos.x < 0 || f.pos.x > W)) { f.crossing = true; f.leaving = true; }
+    if (f.crossing && f.pos.x > bodyLen && f.pos.x < W - bodyLen) { f.crossing = false; f.leaving = false; }
+    if (f.crossing && (f.pos.x < -bodyLen - 4 || f.pos.x > W + bodyLen + 4)) {
+      f.away = true; f.returnT = rng.uniform(T.returnDelayMin, Math.max(T.returnDelayMin, T.returnDelayMax));
+    }
+
+    // surface crossings → splashes
+    if (!f.airborne && f.pos.y < SURFACE_Y && f.vel.y < 0) { f.airborne = true; splash(tk, f.pos.x, Math.abs(f.vel.y), fishColorHead(f)); }
+    else if (f.airborne && f.pos.y >= SURFACE_Y && f.vel.y > 0) {
+      f.airborne = false; f.leapT = 0; f.vel.y *= 0.35; f.vel.x *= 0.8; f.boostT = 0.4;
+      splash(tk, f.pos.x, f.vel.y * 2.6 + 40, fishColorHead(f));
+    }
+    // random darts (straight ahead, so no sudden turn) leave a bubble spray
+    const u = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
+    const ahead = v(f.pos.x + u.x * ms * 2.3, f.pos.y + u.y * ms * 2.3);   // ~1 s of sprint
+    const clearAhead = ahead.x > T.edgeMargin && ahead.x < W - T.edgeMargin && ahead.y > SURFACE_Y + T.edgeMargin && ahead.y < H - 30 - T.edgeMargin;
+    if (clearAhead && !f.airborne && f.leapT <= 0 && f.turnP === 0 && rng.uniform(0, 1) < T.dartPerSec * dt) {
+      f.vel = v(u.x * ms * 2.3, u.y * ms * 2.3); f.boostT = 0.7;
+      for (let k = 0; k < 7; k++) emit(tk, { kind: "bubble", pos: v(f.pos.x - u.x * 10, f.pos.y), vel: v(-u.x * rng.uniform(10, 30), rng.uniform(-12, 4)), life: rng.uniform(0.8, 1.6), max: 1.6, color: scene.bubble, ch: rng.uniform(0, 1) < 0.6 ? "." : "o" });
+    }
+  });
+  if (rng.uniform(0, 1) < T.leapPerSec * dt) tryAutoLeap(tk);
+
+  // 3) ambient bubbles (pop at the surface with a tiny ripple)
+  tk.bubbleAcc += T.bubblesPerSec * dt;
+  while (tk.bubbleAcc >= 1) {
+    tk.bubbleAcc -= 1;
+    if (tk.bubbles.length < BUBBLE_CAP) tk.bubbles.push({ pos: v(rng.uniform(8, W - 8), H + 2), phase: rng.uniform(0, TAU), rise: T.bubbleRise * rng.uniform(0.8, 1.2) });
+  }
+  for (const b of tk.bubbles) b.pos.y -= b.rise * dt;
+  tk.bubbles = tk.bubbles.filter((b) => { if (b.pos.y < SURFACE_Y + 1) { ripple(tk, b.pos.x, 0.5); return false; } return true; });
+
+  // 4) particles
+  for (const p of tk.particles) {
+    if (p.kind === "drop") p.vel.y += GRAVITY * dt;
+    else if (p.kind === "bubble") { p.vel.y -= 40 * dt; p.vel.x *= 1 - 1.5 * dt; }
+    else { p.vel.x *= 1 - 2.5 * dt; p.vel.y *= 1 - 2.5 * dt; }
+    p.pos.x += p.vel.x * dt; p.pos.y += p.vel.y * dt; p.life -= dt;
+    if (p.kind === "drop" && p.vel.y > 0 && p.pos.y > SURFACE_Y + 1) { p.life = 0; ripple(tk, p.pos.x, 0.35); }
+    if (p.kind === "bubble" && p.pos.y < SURFACE_Y + 1) p.life = 0;
+  }
+  tk.particles = tk.particles.filter((p) => p.life > 0 && p.pos.x > -10 && p.pos.x < W + 10 && p.pos.y < H + 10);
+  tk.ripples = tk.ripples.filter((r) => tk.time - r.t0 < 3.5);
+
+  // 5) plankton drift
+  for (const p of tk.plankton) {
+    p.pos.x = (p.pos.x + p.vel.x * dt + W) % W;
+    p.pos.y = SURFACE_Y + ((p.pos.y - SURFACE_Y + p.vel.y * dt + (H - SURFACE_Y)) % (H - SURFACE_Y));
+  }
+  tk.time += dt;
+}
+
+const seaweedSway = (hf, t, ph) =>
+  T.seaweedSwayAmp * hf * hf * (0.7 * Math.sin(TAU * T.seaweedHz[0] * t + ph) + 0.3 * Math.sin(TAU * T.seaweedHz[1] * t + 1.7 * ph));
+
+// ================================================================ rendering
+const canvas = document.getElementById("tank");
+const ctx = canvas.getContext("2d");
+let SCALE = 3, pixelMode = false, deviceMode = true;
+// Device mode: a 320×240 canvas showing the RGB565 framebuffer, scaled up with hard pixels.
+// Smooth mode: the canvas renderer at 3× (nicer to look at, NOT what the hardware shows).
+function setMode(device) {
+  deviceMode = device; pixelMode = device; SCALE = device ? 1 : 3;
+  canvas.width = W * SCALE; canvas.height = H * SCALE;
+  canvas.classList.toggle("pixel", device);
+  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+}
+const P = (x) => (pixelMode ? Math.round(x) : x);
+
+let palHsl = [];
+function refreshPalettes() { palHsl = palettes.map(([a, b]) => [hexToHsl(a), hexToHsl(b)]); }
+const sceneHsl = {};
+function refreshScene() { for (const k in scene) sceneHsl[k] = hexToHsl(scene[k]); }
+
+// Water glow, pre-rendered once: teal under the surface → indigo → violet in the depths,
+// faded to PURE BLACK at all four edges so the screen's outline never shows on the reflector.
+let bgCanvas = null;
+function buildBackground() {
+  bgCanvas = document.createElement("canvas"); bgCanvas.width = W; bgCanvas.height = H;
+  const g = bgCanvas.getContext("2d"), img = g.createImageData(W, H), d = img.data;
+  const top = hexToRgb(scene.waterTop), mid = hexToRgb(scene.waterMid), deep = hexToRgb(scene.waterDeep);
+  const k = 0.32 * T.bgGlow;
+  const rgbAt = (x, y) => {
+    const u = clamp((y - SURFACE_Y) / (H - SURFACE_Y), 0, 1);
+    const c = u < 0.5 ? top.map((a, i) => a + (mid[i] - a) * (u / 0.5)) : mid.map((a, i) => a + (deep[i] - a) * ((u - 0.5) / 0.5));
+    const edge = Math.min(x, W - 1 - x, y - SURFACE_Y, H - 1 - y);
+    const fade = y < SURFACE_Y ? 0 : smooth(0, 38, edge);
+    const center = 1 - 0.35 * Math.hypot((x - W / 2) / (W / 2), (y - H * 0.45) / (H / 2));
+    const m = k * fade * clamp(center, 0, 1) * (1.15 - 0.45 * u);
+    return [c[0] * m, c[1] * m, c[2] * m];
+  };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const [r, gg, b] = rgbAt(x, y), o = (y * W + x) * 4;
+    d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  buildBackground565(rgbAt);                 // device version: RGB565 with ordered dithering
+}
+
+function fishCharColor(f, j, n, t) {
+  const [a, b] = palHsl[f.pal % palHsl.length];
+  const u = n > 1 ? j / (n - 1) : 0, d = DEPTH[f.layer];
+  let h = lerpHue(a[0], b[0], u), s = a[1] + (b[1] - a[1]) * u, l = a[2] + (b[2] - a[2]) * u;
+  h = lerpHue(h, 215, d.blue);
+  s = s * d.s * T.vibrance;
+  l = l * d.l + T.shimmer * Math.sin(t * 3.1 - j * 0.85 + f.id * 1.7) * d.l;
+  return hsl(h, s, l);
+}
+
+function drawRays(tk) {
+  if (T.rays <= 0) return;
+  const t = tk.time, [r, g, b] = hexToRgb(scene.ray);
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for (const ray of tk.rays) {
+    const sway = 7 * Math.sin(t * 0.21 + ray.phase), a = 0.11 * T.rays * (0.6 + 0.4 * Math.sin(t * 0.5 + ray.phase * 2));
+    const x0 = ray.x + sway, x1 = x0 + ray.slant, yb = H * 0.88;
+    const grad = ctx.createLinearGradient(0, SURFACE_Y, 0, yb);
+    grad.addColorStop(0, `rgba(${r},${g},${b},${a})`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x0 - ray.w / 2, SURFACE_Y); ctx.lineTo(x0 + ray.w / 2, SURFACE_Y);
+    ctx.lineTo(x1 + ray.w * 0.9, yb); ctx.lineTo(x1 - ray.w * 0.9, yb); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawReef(tk) {
+  if (!T.reef) return;
+  const t = tk.time;
+  ctx.font = "bold 8px monospace";
+  // corals: dark at the base, bright at the tips; flexible ones sway
+  for (const c of tk.reef) {
+    const [h, s, l] = hexToHsl(c.color), rows = c.rows.length;
+    c.rows.forEach((row, r) => {
+      const up = (rows - 1 - r) / Math.max(1, rows - 1);            // 0 at base, 1 at top
+      [...row].forEach((ch, k) => {
+        if (ch === " ") return;
+        const sway = c.flex ? Math.sin(t * 1.1 + c.phase + k * 0.35) * 1.8 * up : 0;
+        const glow = c.glow ? 0.12 * Math.sin(t * 2.2 + c.phase + k) * up : 0;
+        ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.45 + 0.55 * up) + glow);
+        ctx.fillText(ch, P(c.x + (k - row.length / 2) * CELL_W + sway), P(H - 5 - (rows - 1 - r) * CELL_H));
+      });
+    });
+  }
+  // sand + pebbles
+  ctx.font = "7px monospace";
+  const [ah, as, al] = sceneHsl.sand;
+  for (const g of tk.sand) {
+    if (g.pebble) { const [ph, ps, pl] = hexToHsl(g.pebble); ctx.fillStyle = hsl(ph, ps * T.vibrance, pl * 0.75); ctx.fillText("o", P(g.x), P(g.y)); }
+    else { ctx.fillStyle = hsl(ah, as, al * 0.6); ctx.fillText(g.ch, P(g.x), P(g.y)); }
+  }
+}
+
+// ---------------------------------------------------------------- rocks
+const hslMemo = new Map();
+const hslOf = (hex) => { let c = hslMemo.get(hex); if (!c) { c = hexToHsl(hex); hslMemo.set(hex, c); } return c; };
+
+function drawStar(x, y, R, color, rot) {
+  const [h, s, l] = hslOf(color);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) { const r = k % 2 ? R * 0.42 : R, a = -Math.PI / 2 + k * Math.PI / 5; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  ctx.closePath();
+  ctx.fillStyle = hsl(h, s * T.vibrance, l); ctx.fill();
+  ctx.strokeStyle = hsl(h, s, l * 0.5); ctx.lineWidth = 0.4; ctx.stroke();
+  ctx.fillStyle = hsl(h, s * 0.6, Math.min(0.9, l * 1.4));
+  for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * TAU / 5; ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5, 0.35, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+
+// Boulders: lit from the surface (upper-left highlight), dark at the base, with speckles,
+// moss on top and the odd starfish.
+function drawAsciiRocks(tk) {
+  const baseY = H - 3, [mh, ms, ml] = sceneHsl.seaweedTip;
+  ctx.font = "bold 8px monospace";
+  for (const r of tk.rocks) {
+    const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
+    const h = (h0 + r.hueShift + 360) % 360, s = s0 * T.vibrance * 0.85, l = l0 * r.lMul;
+    let peak = r.cells[0];
+    for (const c of r.cells) {
+      if (c.y < peak.y) peak = c;
+      const u = c.x / r.w + 0.5, up = -c.y / r.h;                  // 0..1 left→right, base→top
+      const light = 0.45 + 0.75 * up + 0.3 * (0.5 - u);            // lit from above-left
+      ctx.fillStyle = c.moss ? hsl(mh, ms * T.vibrance * 0.8, ml * 0.6) : hsl(h, s, l * light * (c.top ? 1.25 : 1));
+      ctx.fillText(c.moss ? '"' : c.ch, P(r.x + c.x), P(baseY + c.y));
+    }
+    if (r.star) {
+      const [sh, ss, sl] = hslOf(r.star);
+      ctx.font = "bold 12px monospace"; ctx.fillStyle = hsl(sh, ss * T.vibrance, sl);
+      ctx.fillText("*", P(r.x + peak.x), P(baseY + peak.y - 5));
+      ctx.font = "bold 8px monospace";
+    }
+  }
+}
+
+function drawRocks(tk) {
+  if (asciiStyle) return drawAsciiRocks(tk);
+  const baseY = H - 3;
+  for (const r of tk.rocks) {
+    const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
+    const h = (h0 + r.hueShift + 360) % 360, s = s0 * T.vibrance * 0.85, l = l0 * r.lMul, p = r.pts;
+    ctx.save(); ctx.translate(r.x, baseY);
+    const path = new Path2D();
+    path.moveTo(p[0].x, 0);
+    for (let k = 0; k < p.length - 1; k++) path.quadraticCurveTo(p[k].x, p[k].y, (p[k].x + p[k + 1].x) / 2, (p[k].y + p[k + 1].y) / 2);
+    path.lineTo(p[p.length - 1].x, 0); path.closePath();
+    const g = ctx.createLinearGradient(-r.w * 0.3, -r.h, r.w * 0.2, 0);
+    g.addColorStop(0, hsl(h, s, l * 1.45)); g.addColorStop(0.55, hsl(h, s, l * 0.9)); g.addColorStop(1, hsl(h, s * 0.9, l * 0.4));
+    ctx.fillStyle = g; ctx.fill(path);
+    ctx.save(); ctx.clip(path);
+    const rg = ctx.createRadialGradient(-r.w * 0.18, -r.h * 0.85, 0, -r.w * 0.18, -r.h * 0.85, r.w * 0.45);
+    rg.addColorStop(0, hsl(h, s * 0.7, Math.min(0.8, l * 1.9), 0.35)); rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg; ctx.fillRect(-r.w / 2, -r.h * 1.2, r.w, r.h * 1.2);
+    ctx.fillStyle = hsl(h, s, l * 0.55, 0.8);
+    for (const sp of r.specks) { ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, TAU); ctx.fill(); }
+    ctx.restore();
+    ctx.strokeStyle = hsl(h, s, l * 0.35, 0.9); ctx.lineWidth = 0.6; ctx.stroke(path);
+    const [mh, ms, ml] = sceneHsl.seaweedTip;
+    ctx.fillStyle = hsl(mh, ms * T.vibrance * 0.8, ml * 0.5);
+    for (const m of r.moss) { ctx.beginPath(); ctx.ellipse(m.x, m.y, m.r * 1.4, m.r * 0.7, 0, 0, TAU); ctx.fill(); }
+    if (r.star) { const top = p.reduce((a, b) => (b.y < a.y ? b : a)); drawStar(top.x * 0.6, top.y + 2, Math.max(3, r.h * 0.16), r.star, r.starRot); }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------- real fish
+// Color for a fish part, graded for depth (far = darker, less saturated, bluer).
+function dcol(hex, L, lMul = 1, alpha = 1) {
+  const [h, s, l] = hslOf(hex), d = DEPTH[L];
+  return hsl(lerpHue(h, 215, d.blue), s * d.s * T.vibrance, l * d.l * lMul, alpha);
+}
+
+// Drawn in fish-local space: nose at (0,0), body toward -x. Placement is
+// translate → scale(facing × flip-squeeze) → rotate(tilt), so a flip-turn reads as the
+// fish rotating toward you and a tilt pitches the nose up or down.
+function drawRealFish(f, t, squeeze) {
+  const L = f.layer, S = FISH_SHAPE[L], look = LOOKS[f.pal % LOOKS.length];
+  const [cHead, cTail] = palettes[f.pal % palettes.length];
+  const len = S.L, hh = S.H, d = DEPTH[L];
+  const longFins = look === "betta", tallFins = L === 2 && (look === "tang" || look === "stripes" || look === "spots");
+  const tailLen = S.T * (longFins ? 1.9 : look === "goldfish" ? 1.4 : 1);
+  const wag = Math.sin(f.wavePhase) * (longFins ? 0.42 : 0.32);
+  const bend = hh * 0.22 * Math.sin(f.wavePhase - 1.1);       // rear of the body sways with the tail
+  ctx.save();
+  ctx.translate(P(f.pos.x), P(f.pos.y));
+  ctx.scale((f.facingRight ? 1 : -1) * squeeze, 1);
+  ctx.rotate(f.tilt);
+  ctx.lineJoin = "round";
+
+  // tail, wagging about the base of the tail
+  ctx.save();
+  ctx.translate(-len * 0.9, bend); ctx.rotate(wag);
+  ctx.beginPath();
+  const spread = longFins ? 1.5 : 1;
+  if (look === "goldfish") {                 // fancy double-lobed tail
+    ctx.moveTo(0, -hh * 0.3);
+    ctx.quadraticCurveTo(-tailLen * 0.6, -hh * 1.5, -tailLen, -hh * 1.2);
+    ctx.quadraticCurveTo(-tailLen * 0.55, -hh * 0.2, -tailLen * 0.9, 0);
+    ctx.quadraticCurveTo(-tailLen * 0.55, hh * 0.2, -tailLen, hh * 1.2);
+    ctx.quadraticCurveTo(-tailLen * 0.6, hh * 1.5, 0, hh * 0.3);
+  } else {                                   // forked tail (long and flowing for the betta)
+    ctx.moveTo(0, -hh * 0.28);
+    ctx.quadraticCurveTo(-tailLen * 0.55, -hh * 0.5 * spread, -tailLen, -hh * spread);
+    ctx.quadraticCurveTo(-tailLen * (longFins ? 0.75 : 0.62), 0, -tailLen, hh * spread);
+    ctx.quadraticCurveTo(-tailLen * 0.55, hh * 0.5 * spread, 0, hh * 0.28);
+  }
+  ctx.closePath();
+  const tg = ctx.createLinearGradient(0, 0, -tailLen, 0);
+  tg.addColorStop(0, dcol(cTail, L, 0.9)); tg.addColorStop(1, dcol(cTail, L, 1.15, longFins ? 0.75 : 0.92));
+  ctx.fillStyle = tg; ctx.fill();
+  if (L > 0) {                               // fin rays
+    ctx.strokeStyle = dcol(cTail, L, 0.6, 0.45); ctx.lineWidth = 0.35;
+    for (const k of [-0.6, -0.2, 0.2, 0.6]) { ctx.beginPath(); ctx.moveTo(-1, k * hh * 0.3); ctx.lineTo(-tailLen * 0.9, k * hh * spread); ctx.stroke(); }
+  }
+  ctx.restore();
+
+  // dorsal (top) and anal (bottom) fins, behind the body
+  const fs = S.fin * (tallFins ? 1.7 : 1) * (longFins ? 1.5 : 1);
+  ctx.fillStyle = dcol(cTail, L, 0.95, 0.85);
+  ctx.beginPath();
+  ctx.moveTo(-len * 0.28, -hh * 0.9);
+  ctx.quadraticCurveTo(-len * 0.45, -hh * (1 + 0.75 * fs), -len * 0.78, -hh * (0.9 + 0.55 * fs) + bend * 0.5);
+  ctx.quadraticCurveTo(-len * 0.66, -hh * 0.75, -len * 0.74, -hh * 0.62 + bend * 0.6);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-len * 0.5, hh * 0.85);
+  ctx.quadraticCurveTo(-len * 0.62, hh * (1 + 0.5 * fs), -len * 0.8, hh * (0.75 + 0.4 * fs) + bend * 0.5);
+  ctx.quadraticCurveTo(-len * 0.72, hh * 0.7, -len * 0.78, hh * 0.55 + bend * 0.6);
+  ctx.closePath(); ctx.fill();
+
+  // body: rounded snout, tapering to the tail; color runs head → tail
+  const body = new Path2D();
+  body.moveTo(0, 0);
+  body.bezierCurveTo(-len * 0.02, -hh * 0.78, -len * 0.42, -hh * 1.12, -len * 0.92, -hh * 0.3 + bend);
+  body.lineTo(-len * 0.92, hh * 0.3 + bend);
+  body.bezierCurveTo(-len * 0.42, hh * 1.05, -len * 0.02, hh * 0.75, 0, 0);
+  body.closePath();
+  const base = look === "tetra" ? ["#34507a", "#3b2f52"] : [cHead, cTail];
+  const bg = ctx.createLinearGradient(0, 0, -len, 0);
+  bg.addColorStop(0, dcol(base[0], L)); bg.addColorStop(1, dcol(base[1], L));
+  ctx.fillStyle = bg; ctx.fill(body);
+
+  ctx.save(); ctx.clip(body);
+  const blob = (x, y, rx, ry, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.fill(); };
+  if (look === "tetra") {                    // glowing blue-green stripe over a red rear belly
+    blob(-len * 0.62, hh * 0.38, len * 0.32, hh * 0.42, dcol(cTail, L));
+    blob(-len * 0.5, -hh * 0.12, len * 0.38, hh * 0.18, dcol(cHead, L, 1.25));
+  } else if (look === "clown") {             // white bands with dark edges
+    for (const bx of [0.2, 0.5, 0.8]) { blob(-len * bx, 0, len * 0.075, hh * 1.4, dcol("#1a1010", L, 1, 0.9)); blob(-len * bx, 0, len * 0.05, hh * 1.4, dcol(cTail, L, 1.05)); }
+  } else if (look === "spots") {             // dark spots
+    for (let k = 0; k < 6; k++) blob(-len * (0.3 + 0.1 * k), hh * 0.45 * Math.sin(k * 2.3 + f.id), Math.max(0.5, hh * 0.13), Math.max(0.5, hh * 0.13), dcol(cTail, L, 0.45, 0.85));
+  } else if (look === "stripes") {           // thin vertical stripes
+    for (const bx of [0.32, 0.46, 0.6, 0.74]) blob(-len * bx, 0, len * 0.025, hh * 1.3, dcol(cTail, L, 0.55, 0.75));
+  } else if (look === "tang") {              // dark swoosh along the flank
+    ctx.strokeStyle = dcol("#101a40", L, 1, 0.85); ctx.lineWidth = hh * 0.28;
+    ctx.beginPath(); ctx.moveTo(-len * 0.2, -hh * 0.35); ctx.quadraticCurveTo(-len * 0.55, hh * 0.35, -len * 0.92, -hh * 0.1); ctx.stroke();
+  } else {                                   // betta, goldfish: soft sheen along the back
+    blob(-len * 0.45, -hh * 0.45, len * 0.35, hh * 0.25, dcol(cHead, L, 1.3, 0.45));
+  }
+  const sh = ctx.createLinearGradient(0, -hh, 0, hh);   // light from above: darker back, paler belly
+  sh.addColorStop(0, "rgba(0,0,0,0.35)"); sh.addColorStop(0.45, "rgba(0,0,0,0)");
+  sh.addColorStop(0.75, `rgba(255,255,255,${(0.12 * d.l).toFixed(3)})`); sh.addColorStop(1, `rgba(255,255,255,${(0.22 * d.l).toFixed(3)})`);
+  ctx.fillStyle = sh; ctx.fillRect(-len - 2, -hh * 1.3, len + 4, hh * 2.6);
+  ctx.restore();
+  ctx.strokeStyle = dcol(base[1], L, 0.45, 0.8); ctx.lineWidth = L === 0 ? 0.35 : 0.5; ctx.stroke(body);
+
+  if (L > 0) {
+    ctx.strokeStyle = dcol(base[1], L, 0.4, 0.35); ctx.lineWidth = 0.4;          // gill line
+    ctx.beginPath(); ctx.arc(-len * 0.3, 0, hh * 0.6, -0.9, 0.9); ctx.stroke();
+    ctx.save();                                                                 // pectoral fin, flapping
+    ctx.translate(-len * 0.33, hh * 0.35); ctx.rotate(0.5 + 0.35 * Math.sin(t * 7 + f.id));
+    ctx.fillStyle = dcol(cTail, L, 1.1, 0.7);
+    ctx.beginPath(); ctx.ellipse(-hh * 0.45, 0, hh * 0.5, hh * 0.2, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  // eye: white, pupil, highlight (just a dark dot on the small far fish)
+  const er = Math.max(0.7, hh * 0.24), ex = -len * 0.17, ey = -hh * 0.2;
+  const dot = (x, y, r, c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); };
+  if (L === 0) dot(ex, ey, er * 0.9, "rgba(0,0,0,0.85)");
+  else { dot(ex, ey, er, dcol("#f4f8ff", L)); dot(ex + er * 0.15, ey, er * 0.6, "#05070a"); dot(ex + er * 0.35, ey - er * 0.3, er * 0.22, "rgba(255,255,255,0.9)"); }
+  ctx.restore();
+}
+
+function draw(tk) {
+  const t = tk.time;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(bgCanvas, 0, 0, W, H);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  drawRays(tk);
+
+  // bioluminescent plankton
+  ctx.font = "7px monospace";
+  for (const p of tk.plankton) {
+    const [h, s, l] = hexToHsl(p.color), tw = 0.5 + 0.5 * Math.sin(t * 1.9 + p.phase);
+    ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.25 + 0.55 * tw * tw));
+    ctx.fillText(".", P(p.pos.x), P(p.pos.y));
+  }
+
+  drawRocks(tk);
+
+  // seaweed: each stalk tinted between green and teal; dark root, bright tip
+  ctx.font = "bold 8px monospace";
+  const [bh, bs, bl] = sceneHsl.seaweedBase, [th, ts, tl] = sceneHsl.seaweedTip;
+  for (const s of tk.seaweed) {
+    const segs = Math.max(2, Math.floor(s.height / SEAWEED_SEG_PX));
+    for (let i = 0; i < segs; i++) {
+      const hf = i / (segs - 1);
+      const hue = lerpHue(lerpHue(bh, th, hf), 170, s.tint * 0.5);
+      ctx.fillStyle = hsl(hue, (bs + (ts - bs) * hf) * T.vibrance, bl + (tl - bl) * hf * 0.85);
+      ctx.fillText(i % 2 ? ")" : "(", P(s.x + seaweedSway(hf, t, s.phase)), P(H - 4 - i * SEAWEED_SEG_PX));
+    }
+  }
+
+  drawReef(tk);
+
+  // fish, far → near
+  for (let L = 0; L < 3; L++) {
+    if (!asciiStyle) {
+      for (const f of tk.fish) {
+        if (f.layer !== L || f.away) continue;
+        drawRealFish(f, t, f.turnP > 0 ? Math.max(0.12, Math.abs(1 - 2 * f.turnP)) : 1);
+      }
+      continue;
+    }
+    const fp = FONT_PX[L], adv = ADV[L];
+    ctx.font = `bold ${fp}px monospace`;
+    for (const f of tk.fish) {
+      if (f.layer !== L || f.away) continue;
+      const g = SPECIES[L];
+      const headFirst = f.facingRight ? [...g.right].reverse() : [...g.left];
+      const n = headFirst.length;
+      // flip-turn: the row shortens around its middle (fish turning toward you), then lengthens
+      const squeeze = f.turnP > 0 ? Math.max(0.12, Math.abs(1 - 2 * f.turnP)) : 1;
+      const body = rigidBody(f, n, adv, squeeze);
+      for (let j = 0; j < n; j++) {
+        // a small tail wiggle: grows toward the tail, never enough to break the row
+        const wig = T.bodyWaveAmp * squeeze * (j / (n - 1)) ** 1.5 * Math.sin(f.wavePhase - j * 0.9);
+        ctx.fillStyle = fishCharColor(f, j, n, t);
+        ctx.fillText(headFirst[j], P(body[j].x), P(body[j].y + wig));
+      }
+    }
+  }
+
+  // ambient bubbles
+  ctx.font = "8px monospace";
+  const [uh, us, ul] = sceneHsl.bubble;
+  ctx.fillStyle = hsl(uh, us, ul * 0.8);
+  for (const b of tk.bubbles) {
+    const x = b.pos.x + T.bubbleWobbleAmp * Math.sin(TAU * T.bubbleWobbleHz * t + b.phase);
+    ctx.fillText("o", P(x), P(b.pos.y));
+  }
+
+  // splash particles (fade toward black = invisible in the reflection)
+  for (const p of tk.particles) {
+    const k = clamp(p.life / p.max, 0, 1);
+    const [h, s, l] = hexToHsl(p.color);
+    ctx.font = p.kind === "drop" ? "bold 8px monospace" : "7px monospace";
+    ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.25 + 0.75 * k));
+    ctx.fillText(p.ch, P(p.pos.x), P(p.pos.y));
+  }
+
+  // water surface with glints on the crests
+  ctx.font = "bold 8px monospace";
+  const [sh, ss, sl] = sceneHsl.surface;
+  for (let x = 3; x < W; x += CELL_W) {
+    const y = surfaceAt(tk, x), lift = clamp((SURFACE_Y - y) / 3, -1, 1);
+    ctx.fillStyle = hsl(sh, ss * T.vibrance, sl * (0.6 + 0.35 * lift));
+    ctx.fillText("~", P(x), P(y));
+    const glint = Math.sin(x * 78.233 + Math.floor(t * 3) * 12.9898) * 43758.5453;
+    if (glint - Math.floor(glint) > 0.94) { ctx.fillStyle = "#ffffff"; ctx.fillText("'", P(x), P(y - 4)); }
+  }
+}
+
+// ================================================================ device renderer
+// What the firmware will do, pixel for pixel: draw into a 320×240 RGB565 framebuffer (the
+// LovyanGFX sprite) using only operations the ESP32 does cheaply (memcpy the background,
+// blit 5×7 bitmap glyphs at whole-pixel positions, plot pixels, saturating adds for the
+// light rays), then push it. This is the reference for the C++ renderer.
+
+// 5×7 glyphs (classic GLCD style, as in LovyanGFX's built-in Font0), drawn in a 6×8 cell.
+const GLYPH_ART = {
+  ">": "#....|.#...|..#..|...#.|..#..|.#...|#....",   "<": "....#|...#.|..#..|.#...|..#..|...#.|....#",
+  "(": "...#.|..#..|.#...|.#...|.#...|..#..|...#.",   ")": ".#...|..#..|...#.|...#.|...#.|..#..|.#...",
+  "'": "..#..|..#..|.#...|.....|.....|.....|.....",   "`": ".#...|..#..|...#.|.....|.....|.....|.....",
+  "/": ".....|....#|...#.|..#..|.#...|#....|.....",   "\\": ".....|#....|.#...|..#..|...#.|....#|.....",
+  "|": "..#..|..#..|..#..|..#..|..#..|..#..|..#..",   "-": ".....|.....|.....|#####|.....|.....|.....",
+  "_": ".....|.....|.....|.....|.....|.....|#####",   "#": ".#.#.|.#.#.|#####|.#.#.|#####|.#.#.|.#.#.",
+  "%": "##...|##..#|...#.|..#..|.#...|#..##|...##",   ":": ".....|.##..|.##..|.....|.##..|.##..|.....",
+  '"': ".#.#.|.#.#.|.#.#.|.....|.....|.....|.....",   "*": ".....|..#..|#.#.#|.###.|#.#.#|..#..|.....",
+  "+": ".....|..#..|..#..|#####|..#..|..#..|.....",   ".": ".....|.....|.....|.....|.....|.##..|.##..",
+  ",": ".....|.....|.....|.....|.##..|..#..|.#...",   "o": ".....|.....|.###.|#...#|#...#|#...#|.###.",
+  "~": ".....|.....|.#...|#.#.#|...#.|.....|.....",   "@": ".###.|#...#|#.###|#.#.#|#.###|#....|.###.",
+  "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",   "{": "...##|..#..|..#..|.#...|..#..|..#..|...##",
+  "}": "##...|..#..|..#..|...#.|..#..|..#..|##...",   "&": ".##..|#..#.|#.#..|.#...|#.#.#|#..#.|.##.#",
+};
+const GLYPH = {};
+for (const [ch, art] of Object.entries(GLYPH_ART)) GLYPH[ch] = art.split("|").map((row) => [...row].reduce((m, c, i) => m | (c === "#" ? 16 >> i : 0), 0));
+
+const fb = new Uint16Array(W * H);            // the frame (RGB565), like the PSRAM sprite
+let bg565 = new Uint16Array(W * H);           // pre-rendered, dithered water glow
+const rgb565 = (r, g, b) => ((clamp(r, 0, 255) >> 3) << 11) | ((clamp(g, 0, 255) >> 2) << 5) | (clamp(b, 0, 255) >> 3);
+function hslToRgb(h, s, l) {
+  s = clamp(s, 0, 1); l = clamp(l, 0, 1);
+  const c = (1 - Math.abs(2 * l - 1)) * s, hp = ((h % 360) + 360) % 360 / 60, x = c * (1 - Math.abs((hp % 2) - 1)), m = l - c / 2;
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+const hsl565 = (h, s, l) => { const [r, g, b] = hslToRgb(h, s, l); return rgb565(r | 0, g | 0, b | 0); };
+const RGBA_OF_565 = new Uint32Array(65536);   // display "panel": 565 → screen color
+for (let c = 0; c < 65536; c++) {
+  const r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+  RGBA_OF_565[c] = (255 << 24) | ((((b << 3) | (b >> 2))) << 16) | ((((g << 2) | (g >> 4))) << 8) | ((r << 3) | (r >> 2));
+}
+
+// Ordered (Bayer 4×4) dithering when the glow is quantized to RGB565: dark gradients only
+// get 32 red/blue levels, which shows as banding. Done once at build time → free per frame.
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+function buildBackground565(rgbAt) {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const [r, g, b] = rgbAt(x, y), d = BAYER4[(y & 3) * 4 + (x & 3)] / 16 - 0.5;
+    bg565[y * W + x] = rgb565((r + d * 8) | 0, (g + d * 4) | 0, (b + d * 8) | 0);
+  }
+}
+
+let statGlyphs = 0, statPx = 0;
+function blit(ch, cx, cy, s, color) {          // glyph centred at (cx, cy), nearest-neighbour scaled
+  const g = GLYPH[ch]; if (!g) return;
+  statGlyphs++;
+  const x0 = Math.round(cx - CELL_W * s / 2), y0 = Math.round(cy - CELL_H * s / 2);
+  for (let r = 0; r < 7; r++) {
+    const bits = g[r]; if (!bits) continue;
+    const ya = Math.max(0, y0 + Math.floor(r * s)), yb = Math.min(H, y0 + Math.floor((r + 1) * s));
+    for (let c = 0; c < 5; c++) {
+      if (!(bits & (16 >> c))) continue;
+      const xa = Math.max(0, x0 + Math.floor(c * s)), xb = Math.min(W, x0 + Math.floor((c + 1) * s));
+      for (let y = ya; y < yb; y++) { const o = y * W; for (let x = xa; x < xb; x++) { fb[o + x] = color; statPx++; } }
+    }
+  }
+}
+function plot(x, y, color) { x = Math.round(x); y = Math.round(y); if (x >= 0 && x < W && y >= 0 && y < H) { fb[y * W + x] = color; statPx++; } }
+function addPx(o, r, g, b) {                   // saturating add in RGB565 (light rays)
+  const c = fb[o];
+  const R = Math.min(31, ((c >> 11) & 31) + r), G = Math.min(63, ((c >> 5) & 63) + g), B = Math.min(31, (c & 31) + b);
+  fb[o] = (R << 11) | (G << 5) | B; statPx++;
+}
+
+function fishCharHsl(f, j, n, t) {
+  const [a, b] = palHsl[f.pal % palHsl.length];
+  const u = n > 1 ? j / (n - 1) : 0, d = DEPTH[f.layer];
+  const h = lerpHue(lerpHue(a[0], b[0], u), 215, d.blue);
+  const s = (a[1] + (b[1] - a[1]) * u) * d.s * T.vibrance;
+  const l = (a[2] + (b[2] - a[2]) * u) * d.l + T.shimmer * Math.sin(t * 3.1 - j * 0.85 + f.id * 1.7) * d.l;
+  return [h, s, l];
+}
+
+function drawDevice(tk) {
+  const t = tk.time;
+  statGlyphs = 0; statPx = 0;
+  fb.set(bg565);                                              // memcpy, ~150 KB
+  // light rays: additive, a few hundred short spans per frame
+  if (T.rays > 0) {
+    const [rr, rg, rb] = hexToRgb(scene.ray);
+    for (const ray of tk.rays) {
+      const sway = 7 * Math.sin(t * 0.21 + ray.phase), a = 0.11 * T.rays * (0.6 + 0.4 * Math.sin(t * 0.5 + ray.phase * 2));
+      const x0 = ray.x + sway, yb = Math.floor(H * 0.88);
+      for (let y = SURFACE_Y; y < yb; y++) {
+        const u = (y - SURFACE_Y) / (yb - SURFACE_Y), k = a * (1 - u);
+        const ar = Math.round(rr * k / 8), ag = Math.round(rg * k / 4), ab = Math.round(rb * k / 8);
+        if (!(ar | ag | ab)) continue;
+        const cx = x0 + ray.slant * u, hw = ray.w / 2 + (ray.w * 0.9 - ray.w / 2) * u;
+        for (let x = Math.max(0, Math.round(cx - hw)), xe = Math.min(W, Math.round(cx + hw)); x < xe; x++) addPx(y * W + x, ar, ag, ab);
+      }
+    }
+  }
+  for (const p of tk.plankton) {                              // single pixels
+    const [h, s, l] = hslOf(p.color), tw = 0.5 + 0.5 * Math.sin(t * 1.9 + p.phase);
+    plot(p.pos.x, p.pos.y, hsl565(h, s * T.vibrance, l * (0.25 + 0.55 * tw * tw)));
+  }
+  // rocks (ASCII)
+  const baseY = H - 3, [mh, ms, ml] = sceneHsl.seaweedTip, moss = hsl565(mh, ms * T.vibrance * 0.8, ml * 0.6);
+  for (const r of tk.rocks) {
+    const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
+    const h = (h0 + r.hueShift + 360) % 360, s = s0 * T.vibrance * 0.85, l = l0 * r.lMul;
+    let peak = r.cells[0];
+    for (const c of r.cells) {
+      if (c.y < peak.y) peak = c;
+      const u = c.x / r.w + 0.5, up = -c.y / r.h, light = 0.45 + 0.75 * up + 0.3 * (0.5 - u);
+      blit(c.moss ? '"' : c.ch, r.x + c.x, baseY + c.y, 1, c.moss ? moss : hsl565(h, s, l * light * (c.top ? 1.25 : 1)));
+    }
+    if (r.star) { const [sh, ss, sl] = hslOf(r.star); blit("*", r.x + peak.x, baseY + peak.y - 6, 1.5, hsl565(sh, ss * T.vibrance, sl)); }
+  }
+  // seaweed
+  const [bh, bs, bl] = sceneHsl.seaweedBase, [th, ts, tl] = sceneHsl.seaweedTip;
+  for (const s of tk.seaweed) {
+    const segs = Math.max(2, Math.floor(s.height / SEAWEED_SEG_PX));
+    for (let i = 0; i < segs; i++) {
+      const hf = i / (segs - 1), hue = lerpHue(lerpHue(bh, th, hf), 170, s.tint * 0.5);
+      blit(i % 2 ? ")" : "(", s.x + seaweedSway(hf, t, s.phase), H - 4 - i * SEAWEED_SEG_PX, 1, hsl565(hue, (bs + (ts - bs) * hf) * T.vibrance, bl + (tl - bl) * hf * 0.85));
+    }
+  }
+  // coral
+  if (T.reef) for (const c of tk.reef) {
+    const [h, s, l] = hslOf(c.color), rows = c.rows.length;
+    c.rows.forEach((row, r) => {
+      const up = (rows - 1 - r) / Math.max(1, rows - 1);
+      [...row].forEach((ch, k) => {
+        if (ch === " ") return;
+        const sway = c.flex ? Math.sin(t * 1.1 + c.phase + k * 0.35) * 1.8 * up : 0, glow = c.glow ? 0.12 * Math.sin(t * 2.2 + c.phase + k) * up : 0;
+        blit(ch, c.x + (k - row.length / 2) * CELL_W + sway, H - 5 - (rows - 1 - r) * CELL_H, 1, hsl565(h, s * T.vibrance, l * (0.45 + 0.55 * up) + glow));
+      });
+    });
+  }
+  // sand
+  const [ah, as, al] = sceneHsl.sand, sandC = hsl565(ah, as, al * 0.6);
+  for (const g of tk.sand) {
+    if (g.pebble) { const [ph, ps, pl] = hslOf(g.pebble); blit("o", g.x, g.y, 1, hsl565(ph, ps * T.vibrance, pl * 0.75)); }
+    else blit(g.ch, g.x, g.y, 1, sandC);
+  }
+  // fish, far → near
+  for (let L = 0; L < 3; L++) for (const f of tk.fish) {
+    if (f.layer !== L || f.away) continue;
+    const g = SPECIES[L], headFirst = f.facingRight ? [...g.right].reverse() : [...g.left], n = headFirst.length;
+    const squeeze = f.turnP > 0 ? Math.max(0.12, Math.abs(1 - 2 * f.turnP)) : 1;
+    const body = rigidBody(f, n, ADV[L], squeeze);
+    for (let j = 0; j < n; j++) {
+      const wig = T.bodyWaveAmp * squeeze * (j / (n - 1)) ** 1.5 * Math.sin(f.wavePhase - j * 0.9);
+      const [h, s, l] = fishCharHsl(f, j, n, t);
+      blit(headFirst[j], body[j].x, body[j].y + wig, FONT_SCALE[L], hsl565(h, s, l));
+    }
+  }
+  // bubbles, particles, surface
+  const [uh, us, ul] = sceneHsl.bubble, bubC = hsl565(uh, us, ul * 0.8);
+  for (const b of tk.bubbles) blit("o", b.pos.x + T.bubbleWobbleAmp * Math.sin(TAU * T.bubbleWobbleHz * t + b.phase), b.pos.y, 1, bubC);
+  for (const p of tk.particles) {
+    const k = clamp(p.life / p.max, 0, 1), [h, s, l] = hslOf(p.color);
+    blit(p.ch, p.pos.x, p.pos.y, 1, hsl565(h, s * T.vibrance, l * (0.25 + 0.75 * k)));
+  }
+  const [sh, ss, sl] = sceneHsl.surface;
+  for (let x = 3; x < W; x += CELL_W) {
+    const y = surfaceAt(tk, x), lift = clamp((SURFACE_Y - y) / 3, -1, 1);
+    blit("~", x, y, 1, hsl565(sh, ss * T.vibrance, sl * (0.6 + 0.35 * lift)));
+    const glint = Math.sin(x * 78.233 + Math.floor(t * 3) * 12.9898) * 43758.5453;
+    if (glint - Math.floor(glint) > 0.94) blit("'", x, y - 5, 1, 0xFFFF);
+  }
+}
+
+let devImg = null;
+function presentDevice() {                       // "pushSprite": framebuffer → panel
+  if (!devImg) devImg = ctx.createImageData(W, H);
+  const out = new Uint32Array(devImg.data.buffer);
+  for (let i = 0; i < fb.length; i++) out[i] = RGBA_OF_565[fb[i]];
+  ctx.putImageData(devImg, 0, 0);
+}
+
+// ================================================================ controls
+const $ = (id) => document.getElementById(id);
+const fmt = (x) => (Number.isInteger(x) ? String(x) : String(+x.toFixed(3)));
+
+function slider(label, value, f, onInput) {
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = `<label title="${label}">${label}</label><input type="range"><output></output>`;
+  const input = row.querySelector("input"), out = row.querySelector("output");
+  Object.assign(input, { min: f.min, max: f.max, step: f.step, value });
+  out.textContent = fmt(value);
+  input.addEventListener("input", () => { const x = f.int ? parseInt(input.value, 10) : parseFloat(input.value); out.textContent = fmt(x); onInput(x); });
+  return row;
+}
+
+function buildControls() {
+  const host = $("controls"); host.innerHTML = "";
+  const groups = {};
+  for (const f of FIELDS) {
+    if (!groups[f.g]) {
+      const fs = document.createElement("fieldset"); if (f.fx) fs.className = "fx";
+      fs.innerHTML = `<legend>${f.g}${f.fx ? " · new" : ""}</legend>`; host.appendChild(fs); groups[f.g] = fs;
+    }
+    const changed = () => { if (f.respawn) tank = makeTank(seed); if (f.rebuildBg) buildBackground(); refreshExport(); save(); };
+    if (Array.isArray(f.def)) f.sub.forEach((name, i) => groups[f.g].appendChild(slider(`${f.k}[${name}]`, T[f.k][i], f, (x) => { T[f.k][i] = x; changed(); })));
+    else groups[f.g].appendChild(slider(f.k, T[f.k], f, (x) => { T[f.k] = x; changed(); }));
+  }
+
+  const ph = $("palettes"); ph.innerHTML = "";
+  const names = ["neon tetra", "betta", "goldfish", "clownfish", "lime", "coral", "sky"];
+  palettes.forEach((pal, i) => {
+    const row = document.createElement("div"); row.className = "pal";
+    row.innerHTML = `<span>${names[i] || "palette " + i}</span><input type="color"><input type="color"><div class="swatch"></div>`;
+    const [a, b] = row.querySelectorAll("input"), sw = row.querySelector(".swatch");
+    const paint = () => { sw.style.background = `linear-gradient(90deg, ${pal[0]}, ${pal[1]})`; };
+    a.value = pal[0]; b.value = pal[1]; paint();
+    a.addEventListener("input", () => { pal[0] = a.value; paint(); refreshPalettes(); refreshExport(); save(); });
+    b.addEventListener("input", () => { pal[1] = b.value; paint(); refreshPalettes(); refreshExport(); save(); });
+    ph.appendChild(row);
+  });
+
+  const ch = $("colors"); ch.innerHTML = "";
+  for (const k of Object.keys(DEFAULT_SCENE)) {
+    const row = document.createElement("div"); row.className = "row";
+    row.innerHTML = `<label>${k}</label><input type="color"><output></output>`;
+    const input = row.querySelector("input"); input.value = scene[k];
+    input.addEventListener("input", () => { scene[k] = input.value; refreshScene(); if (k.startsWith("water")) buildBackground(); refreshExport(); save(); });
+    ch.appendChild(row);
+  }
+}
+
+// ================================================================ export
+const toRgb565 = (hex) => {
+  const [r, g, b] = hexToRgb(hex);
+  return "0x" + (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)).toString(16).toUpperCase().padStart(4, "0");
+};
+const cf = (x) => { const s = String(+x.toFixed(3)); return (s.includes(".") ? s : s + ".0") + "f"; };
+function fieldLines(list) {
+  const w = Math.max(...list.map((f) => f.k.length));
+  return list.map((f) => {
+    const val = Array.isArray(f.def) ? `{${T[f.k].map((x) => (f.int ? String(x) : cf(x))).join(", ")}}` : (f.int ? String(T[f.k]) : cf(T[f.k]));
+    return `    /* ${f.k.padEnd(w)} */ ${val},`;
+  });
+}
+function exportText() {
+  return [
+    "// lib/tanksim/tuning.h — values in tank::Tuning field order (DESIGN §6)",
+    "constexpr tank::Tuning kTuning{",
+    ...fieldLines(FIELDS.filter((f) => !f.fx)),
+    "};",
+    "",
+    "// DRAFT new fields (turning, flow, color, background, splashes). Pending DESIGN update.",
+    "constexpr FxTuning kFx{",
+    ...fieldLines(FIELDS.filter((f) => f.fx)),
+    "};",
+    "",
+    "// src/render/palette.h — RGB565",
+    `constexpr uint16_t kFishPalette[${palettes.length}][2] = {  // {head, tail}`,
+    ...palettes.map((p) => `    {${toRgb565(p[0])}, ${toRgb565(p[1])}},`),
+    "};",
+    `constexpr uint16_t kReefPalette[${REEF_COLORS.length}] = {${REEF_COLORS.map(toRgb565).join(", ")}};`,
+    ...Object.keys(scene).map((k) => `constexpr uint16_t k${k[0].toUpperCase() + k.slice(1)}Color = ${toRgb565(scene[k])};`),
+    "",
+    `// tuned with seed ${seed}`,
+  ].join("\n");
+}
+function refreshExport() { $("export").value = exportText(); }
+
+// ================================================================ wiring
+let tank;
+refreshPalettes(); refreshScene();
+setMode(true);
+buildBackground();
+tank = makeTank(seed);
+buildControls(); refreshExport();
+
+$("device").addEventListener("change", (e) => setMode(e.target.checked));
+$("mirror").addEventListener("change", (e) => canvas.classList.toggle("mirror", e.target.checked));
+$("drawn").addEventListener("change", (e) => { asciiStyle = !e.target.checked; if (e.target.checked && deviceMode) { $("device").checked = false; setMode(false); } for (const f of tank.fish) f.body = bodyPoints(f); });
+$("leap").addEventListener("click", () => tryAutoLeap(tank));
+$("reseed").addEventListener("click", () => { seed = (Math.random() * 0xFFFFFFFF) >>> 0; tank = makeTank(seed); refreshExport(); save(); });
+$("reset").addEventListener("click", () => {
+  T = defaultsT(); palettes = clone(DEFAULT_PALETTES); scene = clone(DEFAULT_SCENE);
+  refreshPalettes(); refreshScene(); buildBackground(); tank = makeTank(seed); buildControls(); refreshExport(); save();
+});
+$("copy").addEventListener("click", async () => {
+  const text = exportText();
+  try { await navigator.clipboard.writeText(text); $("copied").textContent = "Copied to clipboard."; }
+  catch (_) { $("export").select(); $("copied").textContent = "Clipboard blocked: text selected, press ⌘/Ctrl+C."; }
+});
+canvas.addEventListener("pointerdown", (e) => {
+  const r = canvas.getBoundingClientRect();
+  let x = (e.clientX - r.left) / r.width * W;
+  const y = (e.clientY - r.top) / r.height * H;
+  if (canvas.classList.contains("mirror")) x = W - x;
+  if (y < SURFACE_Y + 14) splash(tank, x, 70, palettes[tank.rng.int(palettes.length)][0]);
+  else burst(tank, x, y);
+});
+
+// ================================================================ loop
+let last = performance.now(), acc = 0, fps = 60, hudAt = 0, lastRender = 0, lastFrameAt = performance.now();
+function countFrame(now) { const d = (now - lastFrameAt) / 1000; lastFrameAt = now; if (d > 0) fps = fps * 0.9 + (1 / d) * 0.1; }
+function frame(now) {
+  const elapsed = (now - last) / 1000; last = now;
+  acc += elapsed;
+  let n = Math.floor(acc / STEP);
+  if (n > MAX_STEPS) { n = MAX_STEPS; acc = 0; } else { acc -= n * STEP; }
+  for (let i = 0; i < n; i++) step(tank, STEP);
+  // Device mode renders at the panel's real rate: a full 320×240×16-bit push over 40 MHz SPI
+  // takes ~31 ms, so ~30 fps. The simulation still steps at 60 Hz, as in the firmware.
+  if (!deviceMode) { draw(tank); countFrame(now); }
+  else if (now - lastRender >= 1000 / 30 - 2) { drawDevice(tank); presentDevice(); countFrame(now); lastRender = now; }
+  if (now - hudAt > 250) {
+    hudAt = now;
+    $("fps").textContent = fps.toFixed(0); $("nfish").textContent = tank.fish.filter((f) => !f.away).length + "/" + tank.fish.length;
+    $("npart").textContent = tank.particles.length; $("seed").textContent = seed;
+    $("nglyph").textContent = deviceMode ? statGlyphs : "–"; $("npx").textContent = deviceMode ? statPx : "–";
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, rigidBody, get stats() { return { glyphs: statGlyphs, px: statPx }; }, get deviceMode() { return deviceMode; }, fb, drawDevice,
+  leap: () => tryAutoLeap(tank), burst: (x, y) => burst(tank, x, y) };
+</script>
+</body>
+</html>

@@ -1,104 +1,162 @@
 # Ghost Aquarium: Design Spec
 
-This is the source of truth for what the tank must do and look like. The [ADRs](adr/) record why each technical choice was made. The [implementation plan](plans/2026-11-14-phase0-sim-and-renderer.md) breaks the work into tasks.
+This is the source of truth for what the tank must do and look like. The [ADRs](adr/) record why each decision was made. The [implementation plan](plans/2026-11-14-phase0-sim-and-renderer.md) breaks the work into tasks. The look was settled by iterating in the [browser prototype](../prototype/index.html), whose default **Device preview** is the reference renderer ([ADR 0007](adr/0007-browser-prototype-first.md), [ADR 0008](adr/0008-device-render-pipeline-and-budgets.md)).
 
 ## 1. Goal
 
-A desk piece that runs 24/7. ASCII fish, seaweed and bubbles seem to float inside an empty clear box. Motion should feel **fluid, alive and calm**: fish glide, school, drift apart and turn smoothly. Nothing jumps, flickers or tears.
+A desk piece that runs 24/7. ASCII fish, coral, rocks and bubbles seem to float inside an empty clear box. Motion should feel **calm, alive and legible**: fish glide, ease in and out of speed, rise and sink gently, leave and come back, and occasionally leap out of the water. Nothing tears, flickers or turns into a jumble of characters.
 
 ## 2. Non-goals (v1)
 
-- Realistic fish graphics. The style is ASCII by design.
-- Sound.
-- Battery power. The tank runs on USB.
-- Touch input. Interaction arrives in v2 (feed button, phone page).
+- Drawn or vector fish. The style is ASCII; a drawn-fish experiment lives only in the prototype's smooth mode.
+- Sound, battery power, touch input. Interaction (feed button, phone page) arrives in v2.
 
 ## 3. How the illusion works
 
-The screen lies face-up inside the base. A thin clear sheet sits above it at 45° and reflects the screen toward the viewer. The reflected image appears to float behind the sheet. Because it is a reflection, it is **mirrored left to right**. The display controller corrects this in hardware (see [ADR 0003](adr/0003-rendering-lovyangfx-sprite.md)).
+The screen lies face-up inside the base. A thin clear sheet at 45° reflects it toward the viewer, so the image appears to float behind the sheet, **mirrored left to right**. The display controller flips it back in hardware ([ADR 0003](adr/0003-rendering-lovyangfx-sprite.md)).
 
-Black pixels are invisible in the reflection. Everything that isn't black looks like it's floating. So:
+Black pixels are invisible in the reflection, and anything lit floats. Therefore:
 
-- The background is pure black (`0x0000`). Only fish, seaweed and bubbles are lit.
-- The inside walls of the box are matte black, so the room doesn't show in the reflection.
-- The thinnest practical sheet (about 1mm PETG or acrylic) keeps the second, offset reflection from the back surface to a minimum.
+- The water glow fades to **pure black at all four screen edges**, so the outline of the screen never shows on the reflector.
+- No effect may leave non-black residue (for example, alpha-faded trails). Every frame is rebuilt from the background.
+- The box interior is matte black, and the sheet is as thin as practical (about 1 mm) to keep the second reflection small.
 
 ## 4. Scene
 
-| Element | Behavior |
+All on a 320×240 screen. The water surface is at y = 20.
+
+| Element | Content |
 |---|---|
-| **Fish** | 14 fish in 3 depth layers. Each layer is its own school. Fish wander, school, avoid the edges and turn smoothly. |
-| **Depth layers** | Far: small, dim, slow, blue-tinted. Mid: medium. Near: large, bright, fast. Fish only school with fish in their own layer. |
-| **Seaweed** | 4–6 stalks rooted at the bottom. The sway grows toward the tip and uses two overlapping sine waves, so it never looks like it's on a loop. |
-| **Bubbles** | Spawn at random along the bottom, rise steadily, wobble side to side, and disappear at the top. |
+| **Fish** | 12 fish in 3 depth layers (5 Far, 4 Mid, 3 Near). Each is a rigid ASCII row with its own color palette. |
+| **Water surface** | A row of `~` with gentle waves, ripples from splashes and popping bubbles, and occasional white `'` glints. |
+| **Light rays** | 4 soft beams from the surface that sway and pulse slowly. They are added on top of the background (additive), not blended. |
+| **Water glow** | Teal under the surface, then indigo, then violet in the depths, faded to black at every edge. Pre-rendered once and dithered. |
+| **Seabed** | 4 ASCII rocks, 4 seaweed stalks and 3 coral pieces, packed left to right with even gaps, never overlapping. Sand `, . \`` and colored pebbles `o` along the bottom. |
+| **Plankton** | 32 single-pixel specks that drift and twinkle in cyan and reef colors. |
+| **Bubbles** | Ambient bubbles `o` rise and wobble, then pop at the surface with a small ripple. |
+| **Splashes** | Droplets `' .` arc up and fall back; sparkles `*` and bubbles appear when a fish leaps out of or back into the water. |
 
-### Species (ASCII glyphs)
+### Fish glyphs (head → tail as drawn)
 
-| Species | Facing right | Facing left | Layer |
-|---|---|---|---|
-| Minnow | `><>` | `<><` | Far |
-| Tetra | `><('>` | `<')><` | Mid |
-| Angelfish | `><((('>` | `<')))><` | Near |
+| Layer | Facing right | Facing left | Font scale | Character advance |
+|---|---|---|---|---|
+| Far | `><>` | `<><` | 1× | 6 px |
+| Mid | `><('>` | `<')><` | 1.5× | 9 px |
+| Near | `><((('>` | `<')))><` | 2× | 12 px |
 
-Only ASCII characters are used, so every built-in font can draw them.
+### Fish palettes (head color → tail color)
 
-## 5. Motion rules
+`#00f0ff→#ff2d55` neon tetra · `#ff2bd6→#7a3cff` betta · `#ffd400→#ff5a00` goldfish · `#ff8c00→#fff1d6` clownfish · `#b6ff00→#00d5a0` lime · `#ff5e7a→#ffc46b` coral · `#5ad1ff→#b07bff` sky
 
-- **Positions are floats in pixels, not character cells.** Glyphs are drawn at the exact rounded pixel position, so fish glide instead of jumping one cell at a time ([ADR 0005](adr/0005-motion-subpixel-steering.md)).
-- **Steering behaviors** (Reynolds-style): separation, alignment, cohesion, wander and edge avoidance are combined as weighted forces. Each fish's steering is capped at `maxForce` and its speed at the layer's `maxSpeed`.
-- **Facing hysteresis.** A fish flips its glyph only when `|vel.x| > facingThreshold`. Without this, a fish moving straight up or down would flicker between `><>` and `<><` every frame.
-- **Fixed timestep.** The simulation advances in exact 1/60 s steps, separate from the render rate. If a frame stalls (for example a WiFi hiccup in v2), at most 5 steps run and the extra time is dropped, so fish never teleport through walls.
-- **Deterministic.** The same seed always gives the same tank. That makes bugs reproducible and tests exact.
+### Seabed pieces
 
-## 6. Tuning parameters (starting values)
+- **Rocks:** a jittered half-ellipse outline filled with a character grid. The top edge uses `/` `\` `-` depending on slope, the sides use `(` `)`, the inside is about 70% `#` with some `%` and `:`, and some flat top cells grow `"` moss. One or two rocks carry a `*` starfish. Sizes are 60×28, 40×20, 24×12 and 14×7 px (±15%).
+- **Coral templates:** branch coral, sea fan, anemone (glows), brain coral, tube sponges. These are the five templates in `prototype/index.html` (`CORAL`), 5 characters wide.
+- **Seaweed:** alternating `(` and `)` every 8 px, rooted at the bottom, swaying more toward the tip.
 
-These starting values will be tuned in the browser prototype ([ADR 0007](adr/0007-browser-prototype-first.md)) and then copied into `lib/tanksim/tuning.h`.
+## 5. Motion rules ([ADR 0009](adr/0009-motion-model.md))
 
-| Field | Default | Unit | Meaning |
-|---|---|---|---|
-| `maxSpeed[3]` | 18, 28, 40 | px/s | Far, Mid, Near top speed |
-| `maxForce` | 30 | px/s² | Steering cap |
-| `neighborRadius` | 40 | px | Range for schooling |
-| `separationRadius` | 14 | px | Personal space |
-| `cohesionWeight` | 0.6 | | Pull toward the school's center |
-| `alignmentWeight` | 1.0 | | Match neighbors' heading |
-| `separationWeight` | 1.6 | | Push away from crowding |
-| `wanderWeight` | 0.8 | | Strength of the random meander |
-| `wanderJitter` | 2.0 | rad/s | How fast the wander direction drifts |
-| `edgeMargin` | 24 | px | Distance from a wall where turning starts |
-| `edgeWeight` | 2.5 | | Strength of the wall turn |
-| `facingThreshold` | 3 | px/s | Horizontal speed needed to flip the glyph |
-| `fishPerLayer[3]` | 6, 5, 3 | fish | Far, Mid, Near |
-| `bubblesPerSec` | 1.5 | 1/s | Spawn rate |
-| `bubbleRise` | 25 | px/s | Rise speed |
-| `bubbleWobbleAmp` | 2 | px | Side-to-side wobble |
-| `bubbleWobbleHz` | 1.2 | Hz | Wobble frequency |
-| `seaweedSwayAmp` | 6 | px | Sway at the tip |
-| `seaweedHz[2]` | 0.31, 0.83 | Hz | The two sway frequencies |
+1. **Fixed timestep:** the simulation advances in 1/60 s steps, with at most 5 steps per loop and any extra time dropped. It is deterministic for a given seed ([ADR 0005](adr/0005-motion-subpixel-steering.md)).
+2. **Float positions, rigid bodies.** A fish's body is a straight row of characters behind its head at the layer's advance, tilted by a smoothed visual tilt (at most `maxTilt`). It never bends.
+3. **Steering forces, summed per step:**
+   - schooling (same layer)
+   - edges (top, bottom, and side walls only when the fish can't leave)
+   - wander
+   - level swimming and a pull toward the fish's own preferred depth
+
+   All forces are computed from one snapshot of the tank, then all fish move, so the result doesn't depend on fish order.
+4. **Wall priority.** Near a wall the other forces are scaled by `(1 − 0.6e)`, the force budget is multiplied by `(1 + 2e)`, and the turn rate by `(1 + e)`, where e (0–1) is how strongly the wall is pushing.
+5. **Heading limits.** The heading rotates at most `maxTurnRate` rad/s and the pitch stays within `maxPitch` of horizontal. Speed stays between `minSpeedFrac × maxSpeed` and the layer's top speed.
+6. **Reversal is always a flip-turn.** It triggers when the **navigation** force (walls + wander, never schooling) points more than `flipAngle` away from the heading for 0.25 s, with a 3 s cooldown (walls override the cooldown). It also triggers when a course change would cross vertical. During the `turnTime` animation the body shrinks to 12% around its middle, then at the halfway point vx reverses and the glyph swaps.
+7. **Wander** (Reynolds): the fish steers toward a point on a circle of radius 1 placed 2 units ahead. That point drifts by `wanderJitter`, so wander can never point backward.
+8. **Preferred depth.** Each fish gets its own band within its layer (spread evenly). Its preferred depth (homeY) drifts at ±8 px/s and is pulled back toward that band.
+9. **Coming and going.** Exits are **reserved**: a fish that enters the side margin heading outward takes a slot if fewer than `maxAwayFrac` of the fish are away or committed, and side walls are switched off for it. Fish without a slot see the side wall from the full margin, so they always have room to turn. The cap is exact. A fish that has swum completely out of view is away for `uniform(returnDelayMin, returnDelayMax)` s. It then re-enters from a random side, at the depth (best of 6 tries) farthest from its layer-mates, with a 50% chance of a new palette.
+10. **Darts:** a sprint at 2.3× speed for 0.7 s, only when the water 1 s ahead is clear, leaving a bubble spray.
+11. **Leaps:** only Mid and Near fish within 70 px of the surface, away from the side walls (70 px), already heading toward the middle. The fish exits at 100 px/s, falls under 170 px/s² gravity, and splashes on both exit and re-entry.
+12. **Facing:** the glyph always matches the sign of vx outside a flip. If they ever disagree, a flip-turn starts (it never swaps in one frame).
+
+## 6. Tuning parameters
+
+The defaults below are the values from the final prototype. Field **order** matters: the prototype's "Copy as C++" exports positional initializers in exactly this order. `test_tuning` pins the order.
+
+### `tank::Tuning` (core)
+
+| Field | Default | Unit |
+|---|---|---|
+| `maxSpeed[3]` | 16, 26, 38 | px/s (Far, Mid, Near) |
+| `maxForce` | 40 | px/s² |
+| `neighborRadius` | 60 | px |
+| `separationRadius` | 26 | px (× 0.7 / 1.0 / 1.35 by layer) |
+| `cohesionWeight` | 0.35 | |
+| `alignmentWeight` | 1.0 | |
+| `separationWeight` | 2.2 | |
+| `wanderWeight` | 0.6 | × maxForce |
+| `wanderJitter` | 1.6 | rad/s |
+| `edgeMargin` | 36 | px |
+| `edgeWeight` | 2.8 | × maxForce |
+| `facingThreshold` | 2 | px/s |
+| `fishPerLayer[3]` | 5, 4, 3 | fish |
+| `bubblesPerSec` | 1.0 | 1/s |
+| `bubbleRise` | 25 | px/s (× 0.8–1.2) |
+| `bubbleWobbleAmp` | 2 | px |
+| `bubbleWobbleHz` | 1.2 | Hz |
+| `seaweedSwayAmp` | 7 | px at the tip |
+| `seaweedHz[2]` | 0.31, 0.83 | Hz |
+
+### `tank::FxTuning` (motion and look)
+
+| Field | Default | Unit |
+|---|---|---|
+| `maxTurnRate` | 1.6 | rad/s |
+| `maxTilt` | 8 | degrees |
+| `turnTime` | 0.4 | s |
+| `flipAngle` | 100 | degrees |
+| `maxPitch` | 25 | degrees |
+| `returnDelayMin` | 2 | s |
+| `returnDelayMax` | 7 | s |
+| `maxAwayFrac` | 0.35 | |
+| `minSpeedFrac` | 0.3 | |
+| `bodyWaveAmp` | 0.8 | px (tail wiggle) |
+| `bodyWaveHz` | 1.4 | Hz (× 0.4 + 0.9·speed/max) |
+| `levelPull` | 0.7 | |
+| `depthPull` | 0.8 | |
+| `layerSpacing` | 0.4 | cross-layer separation weight |
+| `vibrance` | 1.0 | saturation multiplier |
+| `shimmer` | 0.12 | lightness wobble |
+| `bgGlow` | 0.9 | |
+| `rays` | 0.7 | |
+| `reef` | 1 | 0 or 1 |
+| `dartPerSec` | 0.015 | per fish |
+| `leapPerSec` | 0.08 | per tank |
+| `splashDroplets` | 16 | |
 
 ## 7. Visual rules
 
-- **Layer brightness:** Far 35%, Mid 65%, Near 100%. The Far layer is shifted toward blue. In a Pepper's Ghost box, dimmer layers look further away inside the glass, which gives the scene depth.
-- **Fonts:** Far uses the 6×8 built-in font. Mid and Near use progressively larger monospace fonts.
-- **Draw order:** seaweed, then Far, Mid and Near fish, then bubbles.
+- **Depth grading** for each fish character, applied in HSL: Far lightness ×0.55, saturation ×0.80, hue 30% of the way toward 215°. Mid ×0.80, ×0.92, 10%. Near unchanged.
+- **Fish color:** head palette color → tail palette color across the row, plus shimmer `0.12·sin(3.1t − 0.85j + 1.7·id)`.
+- **Draw order:** background → rays → plankton → rocks → seaweed → coral → sand → fish (Far → Near) → bubbles → particles → surface.
+- **Font:** 5×7 glyphs in a 6×8 cell (LovyanGFX built-in style), placed at whole pixels, scaled 1× / 1.5× / 2× with nearest-neighbor.
+- **Color:** RGB565 only. The background is dithered with a 4×4 Bayer matrix when quantized.
 
-## 8. Performance targets
+## 8. Performance budget ([ADR 0008](adr/0008-device-render-pipeline-and-budgets.md))
 
-| Metric | Target | Reasoning |
-|---|---|---|
-| Simulation rate | 60 Hz fixed | Smooth integration and stable steering |
-| Render rate | ≥ 30 fps | A full 320×240×16-bit frame is 153,600 bytes, about 31 ms over 40 MHz SPI, so roughly 32 fps is the ceiling for a full redraw |
-| Frame jitter | No visible tearing | Draw the whole frame off-screen, then push it in one transfer ([ADR 0003](adr/0003-rendering-lovyangfx-sprite.md)) |
-| Uptime | Weeks without a reset | Task watchdog, no heap allocation per frame |
+| Item | Budget / measured |
+|---|---|
+| Simulation | 60 Hz fixed |
+| Render | 30 fps target. A full 320×240×16-bit push at 40 MHz SPI takes ≈31 ms |
+| Per-frame drawing | ≈290 glyph blits (≈18k pixel writes) when calm, ≤365 when busy (measured in the device preview) |
+| Pools | particles 96, bubbles 24, ripples 12, plankton 32, fish 12 (fixed arrays; when a pool is full, new items are dropped) |
+| Memory | 150 KB frame in internal SRAM, 150 KB dithered background in PSRAM |
+| Uptime | Task watchdog (5 s), no heap allocation after setup |
 
 ## 9. Hardware
 
 | Part | Choice | Decision |
 |---|---|---|
-| MCU | ESP32-S3-DevKitC-1 **N8R8** (8 MB flash, 8 MB octal PSRAM) | [ADR 0004](adr/0004-toolchain-platformio-wokwi.md) |
+| MCU | ESP32-S3-DevKitC-1 **N8R8** | [ADR 0004](adr/0004-toolchain-platformio-wokwi.md) |
 | Display | 2.8" 320×240 ILI9341 SPI TFT | [ADR 0002](adr/0002-display-ili9341-28.md) |
-| Reflector | About 1mm clear PETG or acrylic, optionally with beam-splitter film | §3 |
-| Enclosure | 3D-printed base (FDM) with a matte black interior | [ROADMAP](ROADMAP.md) |
+| Reflector | About 1 mm clear PETG or acrylic, optionally with beam-splitter film | §3 |
+| Enclosure | 3D-printed base, matte black interior | [ROADMAP](ROADMAP.md) |
 
 ### Pin map (ESP32-S3)
 
@@ -106,25 +164,25 @@ These starting values will be tuned in the browser prototype ([ADR 0007](adr/000
 |---|---|---|
 | SPI SCLK | 12 | |
 | SPI MOSI | 11 | |
-| SPI MISO | 13 | Not used by the display. Reserved for an SD card later. |
+| SPI MISO | 13 | Reserved (SD card later) |
 | TFT CS | 10 | |
 | TFT DC | 9 | |
 | TFT RST | 14 | |
-| TFT backlight | 21 | PWM for dimming |
+| TFT backlight | 21 | PWM |
 | Feed button (v2) | 4 | Internal pull-up |
 
-GPIO 35–37 are taken by the octal PSRAM on N8R8 modules. GPIO 0, 3, 45 and 46 are strapping pins. Neither group is used.
+GPIO 35–37 are used by the octal PSRAM, and GPIO 0, 3, 45 and 46 are strapping pins. None of them are used.
 
 ## 10. Code constraints
 
-- C++17. No exceptions and no RTTI in the simulation library.
-- `lib/tanksim/` must not include Arduino, ESP-IDF or display headers. It has to build and test on a laptop ([ADR 0006](adr/0006-host-testable-sim-library.md)).
-- No heap allocation inside `Tank::step()` or `Renderer::draw()` after setup. Vectors reserve their capacity up front.
-- All randomness comes from the seeded `tank::Rng`. No `rand()`, `millis()` or `esp_random()` inside the simulation.
+- C++17, no exceptions and no RTTI in `lib/`.
+- **`lib/tanksim`** (simulation) and **`lib/tankrender`** (framebuffer renderer) include only the standard library. Both build and are tested on a laptop ([ADR 0006](adr/0006-host-testable-sim-library.md)). Only `src/` touches Arduino, ESP-IDF or LovyanGFX.
+- No heap allocation in `Tank::step()` or the renderer after setup: fixed-capacity pools only.
+- All simulation randomness comes from `tank::Rng`.
 
 ## 11. Future (v2, specced separately)
 
-- **Feed button:** pellets drift down and nearby fish steer toward them.
-- **Living tank:** hunger and growth, with state saved to flash (NVS) so it survives power loss.
-- **Phone control:** the ESP32 serves a web page on the local WiFi to feed, name fish or toggle mirroring.
-- **Real-world link:** Open-Meteo (free, no API key) supplies the sunset time and rain for a configurable location. The tank dims at night and gets darker, with more bubbles, when it rains.
+- **Feed button:** pellets drift down and nearby fish steer toward them. A tap scatters fish; that logic exists in the prototype as `burst`.
+- **Living tank:** hunger and growth, with state saved to NVS.
+- **Phone control:** a web page on the local WiFi (feed, name fish, mirror toggle).
+- **Real-world link:** Open-Meteo sunset time and rain for a configurable location.
