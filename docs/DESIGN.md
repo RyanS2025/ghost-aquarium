@@ -25,6 +25,8 @@ Black pixels are invisible in the reflection, and anything lit floats. Therefore
 
 All on a 320×240 screen. The water surface is at y = 20.
 
+> **Changing:** v1 now targets a 128×128 OLED ([ADR 0010](adr/0010-display-ssd1351-oled.md)). This section describes the tuned 320×240 scene until the 128×128 port lands.
+
 | Element | Content |
 |---|---|
 | **Fish** | 12 fish in 3 depth layers (5 Far, 4 Mid, 3 Near). Each is a rigid ASCII row with its own color palette. |
@@ -154,7 +156,7 @@ The defaults below are the values from the final prototype. Field **order** matt
 | Part | Choice | Decision |
 |---|---|---|
 | MCU | ESP32-S3-DevKitC-1 **N8R8** | [ADR 0004](adr/0004-toolchain-platformio-wokwi.md) |
-| Display | 2.8" 320×240 ILI9341 SPI TFT | [ADR 0002](adr/0002-display-ili9341-28.md) |
+| Display | 1.5" 128×128 SSD1351 color OLED (SPI). The Wokwi simulator still uses an ILI9341 | [ADR 0010](adr/0010-display-ssd1351-oled.md) |
 | Reflector | About 1 mm clear PETG or acrylic, optionally with beam-splitter film | §3 |
 | Enclosure | 3D-printed base, matte black interior | [ROADMAP](ROADMAP.md) |
 
@@ -168,7 +170,7 @@ The defaults below are the values from the final prototype. Field **order** matt
 | TFT CS | 10 | |
 | TFT DC | 9 | |
 | TFT RST | 14 | |
-| TFT backlight | 21 | PWM |
+| TFT backlight | 21 | PWM. The OLED has no backlight; brightness is set by panel contrast |
 | Feed button (v2) | 4 | Internal pull-up |
 
 GPIO 35–37 are used by the octal PSRAM, and GPIO 0, 3, 45 and 46 are strapping pins. None of them are used.

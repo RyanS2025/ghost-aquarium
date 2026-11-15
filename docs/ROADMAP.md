@@ -15,27 +15,33 @@ Goal: the full tank running in the Wokwi simulator from tested code, before buyi
 
 Detailed tasks: [Phase 0 plan](plans/2026-11-14-phase0-sim-and-renderer.md)
 
-## Phase 1: Ghost tank, v1 (about $45–55)
+## Phase 1: Ghost tank, v1 (about $50–75)
 
 Goal: a finished desk piece and a 30-second demo video.
 
 **Optics test (before ordering parts)**
-- [ ] Cardboard Pepper's Ghost box using a phone as the screen. Check the ghost's size, brightness, sheet thickness and how much a double image shows. This test confirms or overturns [ADR 0002](adr/0002-display-ili9341-28.md).
+- [ ] Cardboard Pepper's Ghost box using a phone as the screen, masked to the OLED's 27 × 27 mm. Check the ghost's size, brightness, sheet thickness and how much a double image shows ([ADR 0010](adr/0010-display-ssd1351-oled.md)).
 
 **Parts** (exact items and links: [BUY.md](BUY.md))
 - [ ] ESP32-S3-DevKitC-1 N8R8
-- [ ] 2.8" 320×240 ILI9341 SPI TFT
+- [ ] 1.5" 128×128 SSD1351 color OLED (SPI)
 - [ ] Breadboard, jumper wires, USB-C cable
 - [ ] About 1mm clear PETG or acrylic sheet (optionally beam-splitter film)
 
+**128×128 port** ([ADR 0010](adr/0010-display-ssd1351-oled.md))
+- [ ] Screen size in one place; scene re-tuned for 128×128; soak tests pass at the new size
+- [ ] SSD1351 panel config, with the ILI9341 kept for Wokwi; `make sim` shows the 128×128 tank
+- [ ] Burn-in protection: slow whole-image drift, no static UI
+
 **Bring-up**
 - [ ] Firmware from Phase 0 running on the real screen on a breadboard
-- [ ] Mirroring confirmed on the real panel; frame rate measured (target ≥ 30 fps)
-- [ ] Backlight PWM and a night-dim schedule
+- [ ] Rotation and mirroring confirmed on the real panel; frame rate measured (target ≥ 30 fps)
+- [ ] Brightness control and a night-dim schedule (part of burn-in protection on an OLED)
 
 **Enclosure**
 - [ ] Makerspace safety orientation and FDM 3D-printing training
-- [x] Base designed in CAD: screen window + bosses, 45° reflector grooves, USB-C notch, dark back wall. Parametric code-CAD + STLs in [`hardware/`](../hardware/) (`make cad`). **Re-check the dimensions against your real display before printing**
+- [x] Base designed in CAD: screen window + bosses, 45° reflector grooves, USB-C notch, dark back wall. Parametric code-CAD + STLs in [`hardware/`](../hardware/) (`make cad`)
+- [ ] Base resized for the 1.5" OLED module from caliper measurements (`DISP_*` in `ghost_base.py`)
 - [ ] Base printed and assembled
 - [ ] Optional: reflector laser-cut from acrylic
 
@@ -56,7 +62,7 @@ Spec: [v2 interaction](specs/v2-interaction.md). Each feature gets its own plan 
 
 ## Optional upgrade
 
-- [ ] 1.5" SSD1351 color OLED for true blacks (a cleaner ghost). It needs burn-in protection: slow pixel drift and no static UI.
+- [ ] A bigger ghost: a 1.9–2.4" color AMOLED (true black, larger), if 1.5" feels small. It needs a new board or a QSPI driver.
 
 ## Timeline (target)
 

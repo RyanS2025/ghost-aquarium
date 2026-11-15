@@ -1,6 +1,6 @@
 # Ghost Aquarium
 
-**ASCII fish that swim in mid-air.** Ghost Aquarium is a desk aquarium built on an ESP32-S3. A small color screen is hidden in a 3D-printed base, and a clear sheet at 45° reflects it toward the viewer (the *Pepper's Ghost* illusion). Schools of ASCII fish, swaying seaweed and rising bubbles appear to float inside an empty box. It's designed to run 24/7 as a desk piece.
+**ASCII fish that swim in mid-air.** Ghost Aquarium is a desk aquarium built on an ESP32-S3. A small color OLED is hidden in a 3D-printed base, and a clear sheet at 45° reflects it toward the viewer (the *Pepper's Ghost* illusion). Schools of ASCII fish, swaying seaweed and rising bubbles appear to float inside an empty box. It's designed to run 24/7 as a desk piece.
 
 > **Status: design complete, build starting (November 2026).** This README describes the target. The [roadmap](docs/ROADMAP.md) tracks what is actually finished, and a box is ticked only when the work is merged and demonstrated.
 
