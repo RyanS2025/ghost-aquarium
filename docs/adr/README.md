@@ -11,5 +11,6 @@ Each ADR records one significant decision: the context, what was chosen, what wa
 | [0005](0005-motion-subpixel-steering.md) | Sub-pixel float motion with steering behaviors and a fixed timestep | Accepted |
 | [0006](0006-host-testable-sim-library.md) | Keep the simulation in a hardware-free library tested on the laptop | Accepted |
 | [0007](0007-browser-prototype-first.md) | Tune the look in a browser prototype before porting to C++ | Accepted |
+| [0008](0008-device-render-pipeline-and-budgets.md) | Device render pipeline: RGB565 reference renderer, dithered background, fixed pools, banding fallback | Accepted (estimates pending Phase 1) |
 
 New ADRs copy [template.md](template.md).

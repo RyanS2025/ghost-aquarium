@@ -85,13 +85,15 @@
       <span>fps <b id="fps">–</b></span>
       <span>fish <b id="nfish">–</b></span>
       <span>particles <b id="npart">–</b></span>
+      <span>chars/frame <b id="nglyph">–</b></span>
+      <span>px writes/frame <b id="npx">–</b></span>
       <span>seed <b id="seed">–</b></span>
     </div>
   </section>
   <aside>
     <fieldset>
       <legend>View</legend>
-      <label class="check"><input type="checkbox" id="pixel"> Pixel-accurate (exact 320×240 grid)</label>
+      <label class="check"><input type="checkbox" id="device" checked> Device preview: what the ESP32 + ILI9341 will show (320×240, RGB565, 6×8 bitmap font, 30 fps)</label>
       <label class="check"><input type="checkbox" id="mirror"> Mirror (how it looks on the reflector)</label>
       <label class="check"><input type="checkbox" id="drawn"> Drawn fish &amp; rocks instead of ASCII (experiment)</label>
       <div class="btns">
@@ -132,11 +134,14 @@ const SPECIES = [                              // species index == layer in v1
   { right: "><('>",    left: "<')><" },
   { right: "><((('>",  left: "<')))><" },
 ];
-const FONT_PX = [8, 10, 13];
-const ADV = FONT_PX.map((p) => p * 0.62);     // monospace character advance
+const FONT_SCALE = [1, 1.5, 2];               // LovyanGFX setTextSize per layer, built-in 6×8 font
+const CELL_W = 6, CELL_H = 8;                 // 5×7 glyph inside a 6×8 character cell
+const FONT_PX = FONT_SCALE.map((s) => s * CELL_H);   // smooth-preview font sizes
+const ADV = FONT_SCALE.map((s) => s * CELL_W);       // character advance (px)
 const BODY_SPACE = [0.7, 1.0, 1.35];          // separation scales with body size per layer
-const MAX_PARTICLES = 320, MAX_RIPPLES = 24, BUBBLE_CAP = 64;
-const SEAWEED_COUNT = 4, SEAWEED_SEG_PX = 7, PLANKTON = 44;
+// Hardware budgets (ESP32-S3): bounded pools, preallocated in firmware, no per-frame allocation.
+const MAX_PARTICLES = 96, MAX_RIPPLES = 12, BUBBLE_CAP = 24;
+const SEAWEED_COUNT = 4, SEAWEED_SEG_PX = CELL_H, PLANKTON = 32;
 const TAU = Math.PI * 2;
 const HOME_MIN = SURFACE_Y + 32, HOME_MAX = H - 48;   // fish stay above the reef
 
@@ -164,7 +169,7 @@ const FIELDS = [
   { k: "seaweedHz",        g: "Seaweed",   def: [0.31, 0.83], min: 0, max: 2, step: 0.01, sub: ["slow", "fast"] },
   // ---- new fields (draft; DESIGN update pending)
   { k: "maxTurnRate",      g: "Turning", fx: true, def: 1.6,  min: 0.5, max: 8,  step: 0.1 },
-  { k: "maxTilt",          g: "Turning", fx: true, def: 15,   min: 0,   max: 35, step: 1 },
+  { k: "maxTilt",          g: "Turning", fx: true, def: 8,   min: 0,   max: 35, step: 1 },
   { k: "turnTime",         g: "Turning", fx: true, def: 0.4,  min: 0.1, max: 1.2, step: 0.05 },
   { k: "flipAngle",        g: "Turning", fx: true, def: 100,  min: 60,  max: 180, step: 5 },
   { k: "maxPitch",         g: "Turning", fx: true, def: 25,   min: 15,  max: 85,  step: 1 },
@@ -221,7 +226,7 @@ let asciiStyle = true;                                // the project's look; dra
 const fishLen = (L) => (asciiStyle ? SPECIES[L].right.length * ADV[L] : FISH_SHAPE[L].L + FISH_SHAPE[L].T);
 
 // ================================================================ state
-const STORE_KEY = "ghost-aquarium-tuner-v4";
+const STORE_KEY = "ghost-aquarium-tuner-v5";
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const defaultsT = () => Object.fromEntries(FIELDS.map((f) => [f.k, clone(f.def)]));
 let T = defaultsT(), palettes = clone(DEFAULT_PALETTES), scene = clone(DEFAULT_SCENE), seed = 42;
@@ -298,7 +303,7 @@ function makeTank(s) {
     bed.push({ kind: "rock", half: w / 2, w, h });
   }
   for (let i = 0; i < SEAWEED_COUNT; i++) bed.push({ kind: "weed", half: 4 });
-  for (let i = 0; i < 3; i++) bed.push({ kind: "coral", half: 12.5 });
+  for (let i = 0; i < 3; i++) bed.push({ kind: "coral", half: 15 });   // 5 chars × 6 px
   for (let i = bed.length - 1; i > 0; i--) { const j = rng.int(i + 1); [bed[i], bed[j]] = [bed[j], bed[i]]; }
   const used = bed.reduce((a, b) => a + 2 * b.half, 0);
   const gap = Math.max(0, (W - 4 - used) / (bed.length + 1));
@@ -319,7 +324,7 @@ function makeTank(s) {
     plankton.push({ pos: v(rng.uniform(0, W), rng.uniform(SURFACE_Y, H)), vel: v(rng.uniform(-3, 3), rng.uniform(-2, 2)), phase: rng.uniform(0, TAU), color: rng.uniform(0, 1) < 0.5 ? "#4fe9ff" : REEF_COLORS[rng.int(REEF_COLORS.length)] });
   }
   const sand = [];
-  for (let x = 2; x < W; x += 4) sand.push({ x: x + rng.uniform(-1, 1), y: H - 2 - rng.uniform(0, 3), ch: [",", ".", "`", "."][rng.int(4)], pebble: rng.uniform(0, 1) < 0.08 ? REEF_COLORS[rng.int(REEF_COLORS.length)] : null });
+  for (let x = 3; x < W; x += CELL_W) sand.push({ x: x + rng.uniform(-1, 1), y: H - 2 - rng.uniform(0, 3), ch: [",", ".", "`", "."][rng.int(4)], pebble: rng.uniform(0, 1) < 0.08 ? REEF_COLORS[rng.int(REEF_COLORS.length)] : null });
   const rays = [];
   for (let i = 0; i < 4; i++) rays.push({ x: W * (0.15 + 0.7 * i / 3) + rng.uniform(-20, 20), w: rng.uniform(14, 30), slant: rng.uniform(25, 55), phase: rng.uniform(0, TAU) });
   return { rng, fish, seaweed, plankton, reef, rocks, sand, rays, bubbles: [], particles: [], ripples: [], time: 0, bubbleAcc: 0 };
@@ -339,7 +344,7 @@ function makeRock(rng, x, w, h) {
   // ASCII version: a character grid filling the outline. Top-edge characters follow the
   // slope (/ rising, \ falling, - flat), the sides close with ( ), the inside is a dense
   // stone texture, and some flat top cells grow moss.
-  const CW = 4.6, CHH = 6.2, cells = [];
+  const CW = CELL_W, CHH = CELL_H, cells = [];
   const topAt = (x) => {
     for (let k = 0; k < pts.length - 1; k++) {
       const a = pts[k], b = pts[k + 1];
@@ -715,11 +720,13 @@ const seaweedSway = (hf, t, ph) =>
 // ================================================================ rendering
 const canvas = document.getElementById("tank");
 const ctx = canvas.getContext("2d");
-let SCALE = 3, pixelMode = false;
-function setResolution(pixel) {
-  pixelMode = pixel; SCALE = pixel ? 1 : 3;
+let SCALE = 3, pixelMode = false, deviceMode = true;
+// Device mode: a 320×240 canvas showing the RGB565 framebuffer, scaled up with hard pixels.
+// Smooth mode: the canvas renderer at 3× (nicer to look at, NOT what the hardware shows).
+function setMode(device) {
+  deviceMode = device; pixelMode = device; SCALE = device ? 1 : 3;
   canvas.width = W * SCALE; canvas.height = H * SCALE;
-  canvas.classList.toggle("pixel", pixel);
+  canvas.classList.toggle("pixel", device);
   ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
 }
 const P = (x) => (pixelMode ? Math.round(x) : x);
@@ -737,19 +744,21 @@ function buildBackground() {
   const g = bgCanvas.getContext("2d"), img = g.createImageData(W, H), d = img.data;
   const top = hexToRgb(scene.waterTop), mid = hexToRgb(scene.waterMid), deep = hexToRgb(scene.waterDeep);
   const k = 0.32 * T.bgGlow;
-  for (let y = 0; y < H; y++) {
+  const rgbAt = (x, y) => {
     const u = clamp((y - SURFACE_Y) / (H - SURFACE_Y), 0, 1);
     const c = u < 0.5 ? top.map((a, i) => a + (mid[i] - a) * (u / 0.5)) : mid.map((a, i) => a + (deep[i] - a) * ((u - 0.5) / 0.5));
-    for (let x = 0; x < W; x++) {
-      const edge = Math.min(x, W - 1 - x, y - SURFACE_Y, H - 1 - y);
-      const fade = y < SURFACE_Y ? 0 : smooth(0, 38, edge);
-      const center = 1 - 0.35 * Math.hypot((x - W / 2) / (W / 2), (y - H * 0.45) / (H / 2));
-      const m = k * fade * clamp(center, 0, 1) * (1.15 - 0.45 * u);
-      const o = (y * W + x) * 4;
-      d[o] = c[0] * m; d[o + 1] = c[1] * m; d[o + 2] = c[2] * m; d[o + 3] = 255;
-    }
+    const edge = Math.min(x, W - 1 - x, y - SURFACE_Y, H - 1 - y);
+    const fade = y < SURFACE_Y ? 0 : smooth(0, 38, edge);
+    const center = 1 - 0.35 * Math.hypot((x - W / 2) / (W / 2), (y - H * 0.45) / (H / 2));
+    const m = k * fade * clamp(center, 0, 1) * (1.15 - 0.45 * u);
+    return [c[0] * m, c[1] * m, c[2] * m];
+  };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const [r, gg, b] = rgbAt(x, y), o = (y * W + x) * 4;
+    d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = 255;
   }
   g.putImageData(img, 0, 0);
+  buildBackground565(rgbAt);                 // device version: RGB565 with ordered dithering
 }
 
 function fishCharColor(f, j, n, t) {
@@ -793,7 +802,7 @@ function drawReef(tk) {
         const sway = c.flex ? Math.sin(t * 1.1 + c.phase + k * 0.35) * 1.8 * up : 0;
         const glow = c.glow ? 0.12 * Math.sin(t * 2.2 + c.phase + k) * up : 0;
         ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.45 + 0.55 * up) + glow);
-        ctx.fillText(ch, P(c.x + (k - row.length / 2) * 5 + sway), P(H - 5 - (rows - 1 - r) * 7));
+        ctx.fillText(ch, P(c.x + (k - row.length / 2) * CELL_W + sway), P(H - 5 - (rows - 1 - r) * CELL_H));
       });
     });
   }
@@ -1077,13 +1086,194 @@ function draw(tk) {
   // water surface with glints on the crests
   ctx.font = "bold 8px monospace";
   const [sh, ss, sl] = sceneHsl.surface;
-  for (let x = 2; x < W; x += 5) {
+  for (let x = 3; x < W; x += CELL_W) {
     const y = surfaceAt(tk, x), lift = clamp((SURFACE_Y - y) / 3, -1, 1);
     ctx.fillStyle = hsl(sh, ss * T.vibrance, sl * (0.6 + 0.35 * lift));
     ctx.fillText("~", P(x), P(y));
     const glint = Math.sin(x * 78.233 + Math.floor(t * 3) * 12.9898) * 43758.5453;
     if (glint - Math.floor(glint) > 0.94) { ctx.fillStyle = "#ffffff"; ctx.fillText("'", P(x), P(y - 4)); }
   }
+}
+
+// ================================================================ device renderer
+// What the firmware will do, pixel for pixel: draw into a 320×240 RGB565 framebuffer (the
+// LovyanGFX sprite) using only operations the ESP32 does cheaply (memcpy the background,
+// blit 5×7 bitmap glyphs at whole-pixel positions, plot pixels, saturating adds for the
+// light rays), then push it. This is the reference for the C++ renderer.
+
+// 5×7 glyphs (classic GLCD style, as in LovyanGFX's built-in Font0), drawn in a 6×8 cell.
+const GLYPH_ART = {
+  ">": "#....|.#...|..#..|...#.|..#..|.#...|#....",   "<": "....#|...#.|..#..|.#...|..#..|...#.|....#",
+  "(": "...#.|..#..|.#...|.#...|.#...|..#..|...#.",   ")": ".#...|..#..|...#.|...#.|...#.|..#..|.#...",
+  "'": "..#..|..#..|.#...|.....|.....|.....|.....",   "`": ".#...|..#..|...#.|.....|.....|.....|.....",
+  "/": ".....|....#|...#.|..#..|.#...|#....|.....",   "\\": ".....|#....|.#...|..#..|...#.|....#|.....",
+  "|": "..#..|..#..|..#..|..#..|..#..|..#..|..#..",   "-": ".....|.....|.....|#####|.....|.....|.....",
+  "_": ".....|.....|.....|.....|.....|.....|#####",   "#": ".#.#.|.#.#.|#####|.#.#.|#####|.#.#.|.#.#.",
+  "%": "##...|##..#|...#.|..#..|.#...|#..##|...##",   ":": ".....|.##..|.##..|.....|.##..|.##..|.....",
+  '"': ".#.#.|.#.#.|.#.#.|.....|.....|.....|.....",   "*": ".....|..#..|#.#.#|.###.|#.#.#|..#..|.....",
+  "+": ".....|..#..|..#..|#####|..#..|..#..|.....",   ".": ".....|.....|.....|.....|.....|.##..|.##..",
+  ",": ".....|.....|.....|.....|.##..|..#..|.#...",   "o": ".....|.....|.###.|#...#|#...#|#...#|.###.",
+  "~": ".....|.....|.#...|#.#.#|...#.|.....|.....",   "@": ".###.|#...#|#.###|#.#.#|#.###|#....|.###.",
+  "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",   "{": "...##|..#..|..#..|.#...|..#..|..#..|...##",
+  "}": "##...|..#..|..#..|...#.|..#..|..#..|##...",   "&": ".##..|#..#.|#.#..|.#...|#.#.#|#..#.|.##.#",
+};
+const GLYPH = {};
+for (const [ch, art] of Object.entries(GLYPH_ART)) GLYPH[ch] = art.split("|").map((row) => [...row].reduce((m, c, i) => m | (c === "#" ? 16 >> i : 0), 0));
+
+const fb = new Uint16Array(W * H);            // the frame (RGB565), like the PSRAM sprite
+let bg565 = new Uint16Array(W * H);           // pre-rendered, dithered water glow
+const rgb565 = (r, g, b) => ((clamp(r, 0, 255) >> 3) << 11) | ((clamp(g, 0, 255) >> 2) << 5) | (clamp(b, 0, 255) >> 3);
+function hslToRgb(h, s, l) {
+  s = clamp(s, 0, 1); l = clamp(l, 0, 1);
+  const c = (1 - Math.abs(2 * l - 1)) * s, hp = ((h % 360) + 360) % 360 / 60, x = c * (1 - Math.abs((hp % 2) - 1)), m = l - c / 2;
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+const hsl565 = (h, s, l) => { const [r, g, b] = hslToRgb(h, s, l); return rgb565(r | 0, g | 0, b | 0); };
+const RGBA_OF_565 = new Uint32Array(65536);   // display "panel": 565 → screen color
+for (let c = 0; c < 65536; c++) {
+  const r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+  RGBA_OF_565[c] = (255 << 24) | ((((b << 3) | (b >> 2))) << 16) | ((((g << 2) | (g >> 4))) << 8) | ((r << 3) | (r >> 2));
+}
+
+// Ordered (Bayer 4×4) dithering when the glow is quantized to RGB565: dark gradients only
+// get 32 red/blue levels, which shows as banding. Done once at build time → free per frame.
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+function buildBackground565(rgbAt) {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const [r, g, b] = rgbAt(x, y), d = BAYER4[(y & 3) * 4 + (x & 3)] / 16 - 0.5;
+    bg565[y * W + x] = rgb565((r + d * 8) | 0, (g + d * 4) | 0, (b + d * 8) | 0);
+  }
+}
+
+let statGlyphs = 0, statPx = 0;
+function blit(ch, cx, cy, s, color) {          // glyph centred at (cx, cy), nearest-neighbour scaled
+  const g = GLYPH[ch]; if (!g) return;
+  statGlyphs++;
+  const x0 = Math.round(cx - CELL_W * s / 2), y0 = Math.round(cy - CELL_H * s / 2);
+  for (let r = 0; r < 7; r++) {
+    const bits = g[r]; if (!bits) continue;
+    const ya = Math.max(0, y0 + Math.floor(r * s)), yb = Math.min(H, y0 + Math.floor((r + 1) * s));
+    for (let c = 0; c < 5; c++) {
+      if (!(bits & (16 >> c))) continue;
+      const xa = Math.max(0, x0 + Math.floor(c * s)), xb = Math.min(W, x0 + Math.floor((c + 1) * s));
+      for (let y = ya; y < yb; y++) { const o = y * W; for (let x = xa; x < xb; x++) { fb[o + x] = color; statPx++; } }
+    }
+  }
+}
+function plot(x, y, color) { x = Math.round(x); y = Math.round(y); if (x >= 0 && x < W && y >= 0 && y < H) { fb[y * W + x] = color; statPx++; } }
+function addPx(o, r, g, b) {                   // saturating add in RGB565 (light rays)
+  const c = fb[o];
+  const R = Math.min(31, ((c >> 11) & 31) + r), G = Math.min(63, ((c >> 5) & 63) + g), B = Math.min(31, (c & 31) + b);
+  fb[o] = (R << 11) | (G << 5) | B; statPx++;
+}
+
+function fishCharHsl(f, j, n, t) {
+  const [a, b] = palHsl[f.pal % palHsl.length];
+  const u = n > 1 ? j / (n - 1) : 0, d = DEPTH[f.layer];
+  const h = lerpHue(lerpHue(a[0], b[0], u), 215, d.blue);
+  const s = (a[1] + (b[1] - a[1]) * u) * d.s * T.vibrance;
+  const l = (a[2] + (b[2] - a[2]) * u) * d.l + T.shimmer * Math.sin(t * 3.1 - j * 0.85 + f.id * 1.7) * d.l;
+  return [h, s, l];
+}
+
+function drawDevice(tk) {
+  const t = tk.time;
+  statGlyphs = 0; statPx = 0;
+  fb.set(bg565);                                              // memcpy, ~150 KB
+  // light rays: additive, a few hundred short spans per frame
+  if (T.rays > 0) {
+    const [rr, rg, rb] = hexToRgb(scene.ray);
+    for (const ray of tk.rays) {
+      const sway = 7 * Math.sin(t * 0.21 + ray.phase), a = 0.11 * T.rays * (0.6 + 0.4 * Math.sin(t * 0.5 + ray.phase * 2));
+      const x0 = ray.x + sway, yb = Math.floor(H * 0.88);
+      for (let y = SURFACE_Y; y < yb; y++) {
+        const u = (y - SURFACE_Y) / (yb - SURFACE_Y), k = a * (1 - u);
+        const ar = Math.round(rr * k / 8), ag = Math.round(rg * k / 4), ab = Math.round(rb * k / 8);
+        if (!(ar | ag | ab)) continue;
+        const cx = x0 + ray.slant * u, hw = ray.w / 2 + (ray.w * 0.9 - ray.w / 2) * u;
+        for (let x = Math.max(0, Math.round(cx - hw)), xe = Math.min(W, Math.round(cx + hw)); x < xe; x++) addPx(y * W + x, ar, ag, ab);
+      }
+    }
+  }
+  for (const p of tk.plankton) {                              // single pixels
+    const [h, s, l] = hslOf(p.color), tw = 0.5 + 0.5 * Math.sin(t * 1.9 + p.phase);
+    plot(p.pos.x, p.pos.y, hsl565(h, s * T.vibrance, l * (0.25 + 0.55 * tw * tw)));
+  }
+  // rocks (ASCII)
+  const baseY = H - 3, [mh, ms, ml] = sceneHsl.seaweedTip, moss = hsl565(mh, ms * T.vibrance * 0.8, ml * 0.6);
+  for (const r of tk.rocks) {
+    const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
+    const h = (h0 + r.hueShift + 360) % 360, s = s0 * T.vibrance * 0.85, l = l0 * r.lMul;
+    let peak = r.cells[0];
+    for (const c of r.cells) {
+      if (c.y < peak.y) peak = c;
+      const u = c.x / r.w + 0.5, up = -c.y / r.h, light = 0.45 + 0.75 * up + 0.3 * (0.5 - u);
+      blit(c.moss ? '"' : c.ch, r.x + c.x, baseY + c.y, 1, c.moss ? moss : hsl565(h, s, l * light * (c.top ? 1.25 : 1)));
+    }
+    if (r.star) { const [sh, ss, sl] = hslOf(r.star); blit("*", r.x + peak.x, baseY + peak.y - 6, 1.5, hsl565(sh, ss * T.vibrance, sl)); }
+  }
+  // seaweed
+  const [bh, bs, bl] = sceneHsl.seaweedBase, [th, ts, tl] = sceneHsl.seaweedTip;
+  for (const s of tk.seaweed) {
+    const segs = Math.max(2, Math.floor(s.height / SEAWEED_SEG_PX));
+    for (let i = 0; i < segs; i++) {
+      const hf = i / (segs - 1), hue = lerpHue(lerpHue(bh, th, hf), 170, s.tint * 0.5);
+      blit(i % 2 ? ")" : "(", s.x + seaweedSway(hf, t, s.phase), H - 4 - i * SEAWEED_SEG_PX, 1, hsl565(hue, (bs + (ts - bs) * hf) * T.vibrance, bl + (tl - bl) * hf * 0.85));
+    }
+  }
+  // coral
+  if (T.reef) for (const c of tk.reef) {
+    const [h, s, l] = hslOf(c.color), rows = c.rows.length;
+    c.rows.forEach((row, r) => {
+      const up = (rows - 1 - r) / Math.max(1, rows - 1);
+      [...row].forEach((ch, k) => {
+        if (ch === " ") return;
+        const sway = c.flex ? Math.sin(t * 1.1 + c.phase + k * 0.35) * 1.8 * up : 0, glow = c.glow ? 0.12 * Math.sin(t * 2.2 + c.phase + k) * up : 0;
+        blit(ch, c.x + (k - row.length / 2) * CELL_W + sway, H - 5 - (rows - 1 - r) * CELL_H, 1, hsl565(h, s * T.vibrance, l * (0.45 + 0.55 * up) + glow));
+      });
+    });
+  }
+  // sand
+  const [ah, as, al] = sceneHsl.sand, sandC = hsl565(ah, as, al * 0.6);
+  for (const g of tk.sand) {
+    if (g.pebble) { const [ph, ps, pl] = hslOf(g.pebble); blit("o", g.x, g.y, 1, hsl565(ph, ps * T.vibrance, pl * 0.75)); }
+    else blit(g.ch, g.x, g.y, 1, sandC);
+  }
+  // fish, far → near
+  for (let L = 0; L < 3; L++) for (const f of tk.fish) {
+    if (f.layer !== L || f.away) continue;
+    const g = SPECIES[L], headFirst = f.facingRight ? [...g.right].reverse() : [...g.left], n = headFirst.length;
+    const squeeze = f.turnP > 0 ? Math.max(0.12, Math.abs(1 - 2 * f.turnP)) : 1;
+    const body = rigidBody(f, n, ADV[L], squeeze);
+    for (let j = 0; j < n; j++) {
+      const wig = T.bodyWaveAmp * squeeze * (j / (n - 1)) ** 1.5 * Math.sin(f.wavePhase - j * 0.9);
+      const [h, s, l] = fishCharHsl(f, j, n, t);
+      blit(headFirst[j], body[j].x, body[j].y + wig, FONT_SCALE[L], hsl565(h, s, l));
+    }
+  }
+  // bubbles, particles, surface
+  const [uh, us, ul] = sceneHsl.bubble, bubC = hsl565(uh, us, ul * 0.8);
+  for (const b of tk.bubbles) blit("o", b.pos.x + T.bubbleWobbleAmp * Math.sin(TAU * T.bubbleWobbleHz * t + b.phase), b.pos.y, 1, bubC);
+  for (const p of tk.particles) {
+    const k = clamp(p.life / p.max, 0, 1), [h, s, l] = hslOf(p.color);
+    blit(p.ch, p.pos.x, p.pos.y, 1, hsl565(h, s * T.vibrance, l * (0.25 + 0.75 * k)));
+  }
+  const [sh, ss, sl] = sceneHsl.surface;
+  for (let x = 3; x < W; x += CELL_W) {
+    const y = surfaceAt(tk, x), lift = clamp((SURFACE_Y - y) / 3, -1, 1);
+    blit("~", x, y, 1, hsl565(sh, ss * T.vibrance, sl * (0.6 + 0.35 * lift)));
+    const glint = Math.sin(x * 78.233 + Math.floor(t * 3) * 12.9898) * 43758.5453;
+    if (glint - Math.floor(glint) > 0.94) blit("'", x, y - 5, 1, 0xFFFF);
+  }
+}
+
+let devImg = null;
+function presentDevice() {                       // "pushSprite": framebuffer → panel
+  if (!devImg) devImg = ctx.createImageData(W, H);
+  const out = new Uint32Array(devImg.data.buffer);
+  for (let i = 0; i < fb.length; i++) out[i] = RGBA_OF_565[fb[i]];
+  ctx.putImageData(devImg, 0, 0);
 }
 
 // ================================================================ controls
@@ -1176,14 +1366,14 @@ function refreshExport() { $("export").value = exportText(); }
 // ================================================================ wiring
 let tank;
 refreshPalettes(); refreshScene();
-setResolution(false);
+setMode(true);
 buildBackground();
 tank = makeTank(seed);
 buildControls(); refreshExport();
 
-$("pixel").addEventListener("change", (e) => setResolution(e.target.checked));
+$("device").addEventListener("change", (e) => setMode(e.target.checked));
 $("mirror").addEventListener("change", (e) => canvas.classList.toggle("mirror", e.target.checked));
-$("drawn").addEventListener("change", (e) => { asciiStyle = !e.target.checked; for (const f of tank.fish) f.body = bodyPoints(f); });
+$("drawn").addEventListener("change", (e) => { asciiStyle = !e.target.checked; if (e.target.checked && deviceMode) { $("device").checked = false; setMode(false); } for (const f of tank.fish) f.body = bodyPoints(f); });
 $("leap").addEventListener("click", () => tryAutoLeap(tank));
 $("reseed").addEventListener("click", () => { seed = (Math.random() * 0xFFFFFFFF) >>> 0; tank = makeTank(seed); refreshExport(); save(); });
 $("reset").addEventListener("click", () => {
@@ -1205,25 +1395,29 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 // ================================================================ loop
-let last = performance.now(), acc = 0, fps = 60, hudAt = 0;
+let last = performance.now(), acc = 0, fps = 60, hudAt = 0, lastRender = 0, lastFrameAt = performance.now();
+function countFrame(now) { const d = (now - lastFrameAt) / 1000; lastFrameAt = now; if (d > 0) fps = fps * 0.9 + (1 / d) * 0.1; }
 function frame(now) {
   const elapsed = (now - last) / 1000; last = now;
   acc += elapsed;
   let n = Math.floor(acc / STEP);
   if (n > MAX_STEPS) { n = MAX_STEPS; acc = 0; } else { acc -= n * STEP; }
   for (let i = 0; i < n; i++) step(tank, STEP);
-  draw(tank);
-  if (elapsed > 0) fps = fps * 0.95 + (1 / elapsed) * 0.05;
+  // Device mode renders at the panel's real rate: a full 320×240×16-bit push over 40 MHz SPI
+  // takes ~31 ms, so ~30 fps. The simulation still steps at 60 Hz, as in the firmware.
+  if (!deviceMode) { draw(tank); countFrame(now); }
+  else if (now - lastRender >= 1000 / 30 - 2) { drawDevice(tank); presentDevice(); countFrame(now); lastRender = now; }
   if (now - hudAt > 250) {
     hudAt = now;
     $("fps").textContent = fps.toFixed(0); $("nfish").textContent = tank.fish.filter((f) => !f.away).length + "/" + tank.fish.length;
     $("npart").textContent = tank.particles.length; $("seed").textContent = seed;
+    $("nglyph").textContent = deviceMode ? statGlyphs : "–"; $("npx").textContent = deviceMode ? statPx : "–";
   }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, rigidBody,
+window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, rigidBody, get stats() { return { glyphs: statGlyphs, px: statPx }; }, get deviceMode() { return deviceMode; }, fb, drawDevice,
   leap: () => tryAutoLeap(tank), burst: (x, y) => burst(tank, x, y) };
 </script>
 </body>
