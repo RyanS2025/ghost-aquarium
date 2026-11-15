@@ -211,6 +211,8 @@ void test_bake_static_scenery_only_touches_the_seabed() {
 
 // Demo frames for the README GIF, through the exact firmware path (baked scenery + one ray band
 // per frame). Opt-in: GHOST_FRAMES=<dir> pio test -e native -f test_render  (see `make gif`).
+// GHOST_FRAMES_N / GHOST_FRAMES_STEPS set the clip length and sim steps per frame (default 200 × 3
+// = 10 s at 20 fps); GHOST_FRAMES_LEAPS=0 turns off the staged leaps, as on the device (`make clip`).
 void test_render_demo_frames() {
   const char* dir = std::getenv("GHOST_FRAMES");
   if (!dir) TEST_IGNORE_MESSAGE("set GHOST_FRAMES=<dir> to write demo frames");
@@ -220,15 +222,17 @@ void test_render_demo_frames() {
   tank::render::bakeStaticScenery(tk, bg.data());
   std::vector<uint16_t> backdrop(W * H), px(W * H);
   for (int b = 0; b < tank::render::kRayBands; ++b) tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), b);
-  constexpr int kFrames = 200, kStepsPerFrame = 3;  // 20 fps GIF, real-time motion
+  const auto envInt = [](const char* k, int def) { const char* v = std::getenv(k); return v ? std::atoi(v) : def; };
+  const int kFrames = envInt("GHOST_FRAMES_N", 200), kStepsPerFrame = envInt("GHOST_FRAMES_STEPS", 3);  // 20 fps, real time
+  const bool stagedLeaps = envInt("GHOST_FRAMES_LEAPS", 1) != 0;
   for (int n = 0; n < kFrames; ++n) {
     for (int s = 0; s < kStepsPerFrame; ++s) tk.step(1.f / 60.f);
-    if (n % 40 == 10) tk.tryLeap();  // show off a leap + splash when a fish is in position
+    if (stagedLeaps && n % 40 == 10) tk.tryLeap();  // show off a leap + splash when a fish is in position
     tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), n % tank::render::kRayBands);
     Frame f{px.data(), W, H};
     tank::render::renderFrame(tk, backdrop.data(), f, tank::render::kBackdropHasRaysAndScenery);
     char path[512];
-    std::snprintf(path, sizeof(path), "%s/frame_%03d.ppm", dir, n);
+    std::snprintf(path, sizeof(path), "%s/frame_%04d.ppm", dir, n);
     FILE* out = std::fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(out);
     std::fprintf(out, "P6\n%d %d\n255\n", W, H);

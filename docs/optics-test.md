@@ -2,7 +2,7 @@
 
 A 30-minute, zero-cost check before buying the display. Build a small cardboard hood, put your phone under it, and see what a **27 × 27 mm** ghost tank (the 1.5" 128×128 OLED's visible area) looks like on your desk.
 
-> The interactive version, with a calibrated phone **test screen** of ASCII fish, is [`optics-test.html`](optics-test.html). GitHub shows that file as code, so open it from a browser.
+> The interactive version is [`optics-test.html`](optics-test.html). Its calibrated phone **test screen** plays [60 s of the real tank](media/optics-test/tank.mp4), rendered by the firmware's own C++ renderer at 128 × 128 (`make clip`). GitHub shows the HTML file as code, so open it from a browser.
 
 ## How the trick works
 

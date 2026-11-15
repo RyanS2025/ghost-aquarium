@@ -7,7 +7,7 @@ OUT := .pio/out
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test test-ready build build-sim sim snapshot gif cad prototype flash monitor check clean
+.PHONY: help setup test test-ready build build-sim sim snapshot gif clip cad prototype flash monitor check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -56,10 +56,19 @@ snapshot: ## Render one frame with the C++ renderer → .pio/out/frame.png (and 
 gif: ## Render the README demo GIF with the firmware's renderer → docs/media/demo.gif (needs ffmpeg)
 	@rm -rf $(OUT)/frames && mkdir -p $(OUT)/frames
 	GHOST_FRAMES=$(CURDIR)/$(OUT)/frames $(PIO) test -e native -f test_render
-	ffmpeg -loglevel error -y -framerate 20 -i $(OUT)/frames/frame_%03d.ppm \
+	ffmpeg -loglevel error -y -framerate 20 -i $(OUT)/frames/frame_%04d.ppm \
 	  -vf "scale=512:512:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
 	  -loop 0 docs/media/demo.gif
 	@ls -lh docs/media/demo.gif
+
+clip: ## Render 60 s of the real tank at 30 fps → docs/media/optics-test/tank.mp4 (phone test screen; needs ffmpeg)
+	@rm -rf $(OUT)/clip && mkdir -p $(OUT)/clip docs/media/optics-test
+	GHOST_FRAMES=$(CURDIR)/$(OUT)/clip GHOST_FRAMES_N=1800 GHOST_FRAMES_STEPS=2 GHOST_FRAMES_LEAPS=0 \
+	  $(PIO) test -e native -f test_render
+	ffmpeg -loglevel error -y -framerate 30 -i $(OUT)/clip/frame_%04d.ppm \
+	  -vf "scale=512:512:flags=neighbor" -c:v libx264 -preset slow -crf 16 -pix_fmt yuv420p \
+	  -movflags +faststart -an docs/media/optics-test/tank.mp4
+	@ls -lh docs/media/optics-test/tank.mp4
 
 CAD_PY := .pio/cad-venv/bin/python
 cad: ## Regenerate the 3D-printable enclosure (hardware/out/*.stl + cross-section preview)
