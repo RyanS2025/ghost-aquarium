@@ -22,7 +22,7 @@ Goal: a finished desk piece and a 30-second demo video.
 **Optics test (before ordering parts)**
 - [ ] Cardboard Pepper's Ghost box using a phone as the screen. Check the ghost's size, brightness, sheet thickness and how much a double image shows. This test confirms or overturns [ADR 0002](adr/0002-display-ili9341-28.md).
 
-**Parts**
+**Parts** (exact items and links: [BUY.md](BUY.md))
 - [ ] ESP32-S3-DevKitC-1 N8R8
 - [ ] 2.8" 320×240 ILI9341 SPI TFT
 - [ ] Breadboard, jumper wires, USB-C cable
@@ -46,7 +46,7 @@ Goal: a finished desk piece and a 30-second demo video.
 
 ## Phase 2: Interaction, v2 (about $0–5)
 
-Each feature gets its own spec and plan before work starts.
+Spec: [v2 interaction](specs/v2-interaction.md). Each feature gets its own plan before code.
 
 - [ ] **Feed button:** pellets drift down and fish steer toward them
 - [ ] **Living tank:** hunger and growth, with state saved to NVS so it survives power loss
