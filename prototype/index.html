@@ -541,9 +541,19 @@ function step(tk, dt) {
   // 1) forces from one snapshot (order-independent)
   // Coming & going: fish may swim out the sides while fewer than maxAwayFrac are gone
   // (counting fish already crossing out), so the tank never empties.
-  const goneOrLeaving = tk.fish.filter((f) => f.away || (f.crossing && f.leaving)).length;
-  const allowExit = goneOrLeaving < Math.floor(T.maxAwayFrac * tk.fish.length);
-  for (const f of tk.fish) f.sideWalls = !f.crossing && !allowExit;
+  // Exits are RESERVED: a fish entering the side margin heading out takes a slot while fewer than
+  // maxAwayFrac are away/committed; fish without a slot see the wall from the full margin.
+  // (Switching walls on for everyone when the cap filled let near-edge fish drift out: 6 away vs cap 4.)
+  const cap = Math.floor(T.maxAwayFrac * tk.fish.length);
+  let committed = tk.fish.filter((f) => f.away || f.leaving).length;
+  for (const f of tk.fish) {
+    if (f.away || f.airborne) continue;
+    const nearL = f.pos.x < T.edgeMargin, nearR = f.pos.x > W - T.edgeMargin;
+    const out = (nearL && f.vel.x < 0) || (nearR && f.vel.x > 0);
+    if (!f.leaving && !f.crossing && out && committed < cap) { f.leaving = true; committed++; }
+    if (f.leaving && !f.crossing && !nearL && !nearR) f.leaving = false;
+    f.sideWalls = !f.leaving && !f.crossing;
+  }
 
   const edgeFrac = [], nav = [];
   const forces = tk.fish.map((f, i) => {

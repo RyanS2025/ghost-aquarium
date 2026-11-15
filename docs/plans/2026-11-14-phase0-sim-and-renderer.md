@@ -254,7 +254,7 @@ Tasks 5–6 don't wait for this: the stub returns `{}` (fish without schooling),
   test_stepper_caps_steps_and_drops_excess               // Review Focus #2
   test_same_seed_is_deterministic                        // 600 steps, bit-identical fish
   test_fish_leave_and_return                             // within 3 sim-min: ≥1 fish goes away and comes back ≤ returnDelayMax + 0.1 s
-  test_away_cap_holds                                    // away ≤ floor(maxAwayFrac·N) + 1 at every step
+  test_away_cap_holds                                    // away ≤ floor(maxAwayFrac·N) at every step (exits reserved in advance)
   test_leap_goes_airborne_and_splashes                   // tryLeap() → airborne within 1 s, particles > 0
   test_pools_drop_when_full                              // Review Focus #5
   test_soak_facing_always_matches                        // Review Focus #3

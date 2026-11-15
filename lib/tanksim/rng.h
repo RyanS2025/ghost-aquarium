@@ -20,4 +20,10 @@ class Rng {
   uint32_t state_;
 };
 
+// Uniform index in [0, n).
+inline int randomIndex(Rng& rng, int n) {
+  const int k = static_cast<int>(rng.uniform(0.f, static_cast<float>(n)));
+  return k < n ? k : n - 1;
+}
+
 }  // namespace tank

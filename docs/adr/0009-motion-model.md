@@ -23,7 +23,7 @@ ADR 0005's steering model produced fish that *moved* fluidly but *looked* messy.
 3. **Reversals come from navigation only** (walls + wander), with a 0.25 s debounce and a 3 s cooldown (walls override the cooldown). Schooling only bends the course or changes speed.
 4. **Reynolds wander:** the fish steers toward a point that drifts around a circle placed ahead of it, so wander can't point backward.
 5. **Wall priority:** near a wall, other forces are scaled down and the force budget and turn rate go up, so fast fish can turn before leaving the screen.
-6. **Coming and going:** fish swim out the sides and return 2–7 s later from a random side, at the open depth farthest from their layer-mates. A cap (35% away, counting fish already crossing out) keeps the tank from emptying; when the cap is reached, the side walls come back on.
+6. **Coming and going:** fish swim out the sides and return 2–7 s later from a random side, at the open depth farthest from their layer-mates. A cap keeps the tank from emptying: exits are reserved, so a fish takes a slot (35% of the fish) when it enters the side margin heading out, and fish without a slot see the wall early enough to turn.
 7. **Spacing:** separation is measured to the nearest point of each neighbor's *body* (not just its head), scaled by body size per layer. There is light separation across layers too. Preferred depths are spread evenly so fish use the whole tank.
 
 ## Consequences
@@ -37,5 +37,5 @@ Measured in the prototype over 15–30 simulated minutes:
 Other effects:
 
 - Simpler firmware: no per-fish path history (which would have been about 29 KB).
-- The cap on fish away can overshoot by one when two fish cross the edge in the same step. This is cosmetic and was accepted.
+- The away cap is exact because exits are reserved in advance. Found while porting: switching side walls on for everyone when the cap filled let fish a few pixels from the edge drift out anyway (6 away against a cap of 4).
 - These numbers become `tanksim` tests (soak, determinism, bounds, facing) so the C++ port must reproduce them.
