@@ -2,34 +2,38 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Get the full ghost tank (schooling ASCII fish in 3 depth layers, seaweed, bubbles) running in the Wokwi ESP32-S3 simulator from a unit-tested simulation library, without buying any hardware.
+> **Revision 2 (2026-11-14):** Tasks 3–6 were rewritten after the look was settled in the prototype ([ADR 0008](../adr/0008-device-render-pipeline-and-budgets.md), [ADR 0009](../adr/0009-motion-model.md)). Tasks 1–2 are done and unchanged.
 
-**Architecture:** A browser prototype sets the motion and color values. The hardware-free C++ library `lib/tanksim` (namespace `tank`) holds all simulation state and logic and is tested on the laptop with Unity. The firmware in `src/` runs a fixed 60 Hz simulation, draws each frame into a LovyanGFX full-screen sprite, and pushes it to an ILI9341 over DMA, with the display controller mirroring it for the Pepper's Ghost reflection.
+**Goal:** Get the final ASCII ghost tank running from unit-tested, hardware-free C++ libraries, plus firmware that pushes it to an ILI9341 on an ESP32-S3 (Wokwi first), without buying any hardware.
 
-**Tech Stack:** C++17, PlatformIO (`espressif32` platform, Arduino framework, `native` platform), LovyanGFX `^1.2.0`, Unity, Wokwi VS Code extension, GitHub Actions; vanilla HTML/JS canvas for the prototype.
+**Architecture:**
+- `lib/tanksim` (namespace `tank`) is the simulation: fish, schooling, coming and going, ambient life, seabed. It is a C++ port of `step()` in `prototype/index.html`.
+- `lib/tankrender` (namespace `tank::render`) renders a `Tank` into a plain RGB565 framebuffer. It is a C++ port of `drawDevice()` in the prototype.
+- Both libraries use only the standard library and are tested on the laptop.
+- `src/` (firmware) owns the framebuffer memory, runs the 60 Hz stepper, and pushes each frame to the panel with LovyanGFX.
 
-**Spec:** [docs/DESIGN.md](../DESIGN.md). Decisions: [ADR 0003](../adr/0003-rendering-lovyangfx-sprite.md), [0004](../adr/0004-toolchain-platformio-wokwi.md), [0005](../adr/0005-motion-subpixel-steering.md), [0006](../adr/0006-host-testable-sim-library.md), [0007](../adr/0007-browser-prototype-first.md).
+**Tech Stack:** C++17, PlatformIO (`espressif32` + Arduino, `native`), LovyanGFX `^1.2.0`, Unity, Wokwi, GitHub Actions.
+
+**Spec:** [docs/DESIGN.md](../DESIGN.md). Reference implementation: `prototype/index.html` (Device preview). Decisions: ADR [0003](../adr/0003-rendering-lovyangfx-sprite.md), [0004](../adr/0004-toolchain-platformio-wokwi.md), [0005](../adr/0005-motion-subpixel-steering.md), [0006](../adr/0006-host-testable-sim-library.md), [0008](../adr/0008-device-render-pipeline-and-budgets.md), [0009](../adr/0009-motion-model.md).
 
 ## Global Constraints
 
-- Screen: 320×240 landscape. `tank::Bounds{320.f, 240.f}`.
-- C++17. No exceptions or RTTI in `lib/tanksim`.
-- `lib/tanksim` includes only standard-library headers. No `Arduino.h`, ESP-IDF or LovyanGFX.
-- No heap allocation in `Tank::step()` or `Renderer::draw()` after setup. Reserve vector capacity in constructors.
-- All simulation randomness comes from `tank::Rng`. No `rand()`, `millis()` or `esp_random()` in `lib/tanksim`.
-- Simulation step is `1.f / 60.f` s, with at most 5 steps per loop.
-- Tuning field names and defaults exactly as in [DESIGN §6](../DESIGN.md#6-tuning-parameters-starting-values).
-- Pins exactly as in [DESIGN §9](../DESIGN.md#pin-map-esp32-s3). Never use GPIO 0, 3, 35–37, 45 or 46.
-- Glyphs are ASCII only, as in [DESIGN §4](../DESIGN.md#species-ascii-glyphs).
-- Layer index: `Far = 0`, `Mid = 1`, `Near = 2`. In v1 the species index equals the layer index.
+- Screen: 320×240. Water surface at y = 20. Gravity 170 px/s². `tank::kScreen{320.f, 240.f}`.
+- C++17. No exceptions or RTTI in `lib/`. `lib/tanksim` and `lib/tankrender` include only standard-library headers.
+- No heap allocation in `Tank::step()` or `renderFrame()`: fixed pools (fish ≤ 24, particles 96, bubbles 24, ripples 12, plankton 32). When a pool is full, new items are dropped.
+- All simulation randomness comes from `tank::Rng`.
+- Simulation step 1/60 s, at most 5 steps per loop. Render at ≤ 30 fps.
+- Tuning field names, order and defaults exactly as in [DESIGN §6](../DESIGN.md#6-tuning-parameters). Motion rules as in DESIGN §5, look as in DESIGN §4/§7.
+- Pins as in DESIGN §9. Layer index `Far = 0, Mid = 1, Near = 2`; species index = layer.
+- Where DESIGN is silent, the prototype's `step()` / `drawDevice()` is the reference behavior.
 
 ## Review Focus
 
-1. **Zero-length vectors** (two fish at the same spot, a stationary fish). `normalized()` must return `{0,0}`, not NaN, or a fish silently disappears. Tests: Task 2 (`test_normalized_zero_is_zero`) and Task 4 (`test_school_coincident_fish_is_finite`).
-2. **Frame stalls** (a slow push, WiFi in v2). One huge `dt` would make fish tunnel through walls. Run at most 5 fixed steps and drop the rest. Test: Task 5 (`test_stepper_caps_steps_and_drops_excess`).
-3. **Vertical swimming.** When `vel.x ≈ 0` the glyph must not flip every frame. Test: Task 3 (`test_facing_hysteresis_holds_below_threshold`).
-4. **Running for hours.** No NaN, no fish leaving the screen, no slow drift into one corner. Test: Task 5 (`test_soak_100k_steps_finite_and_bounded`).
-5. **Seed 0.** A raw xorshift seeded with 0 outputs 0 forever, which freezes wander and stacks every fish in one place. Test: Task 2 (`test_rng_seed_zero_still_varies`).
+1. **Zero-length vectors** (coincident fish, a stationary fish, zero steering) must never produce NaN. Tests: Task 2 `test_normalized_zero_is_zero`, Task 4 `test_school_coincident_fish_is_finite`, Task 5 soak.
+2. **Frame stalls:** a huge `dt` must not tunnel fish through walls. Test: Task 5 `test_stepper_caps_steps_and_drops_excess`.
+3. **Glyph/heading mismatch** (the "messy fish" bug class): outside a flip-turn, the glyph must always face the direction of vx. Tests: Task 3 `test_safety_net_starts_flip_on_mismatch`, Task 5 `test_soak_facing_always_matches`.
+4. **Long runs (24/7):** no NaN, no vertical escapes, fish always return from away, the tank never empties. Test: Task 5 `test_soak_100k_steps_finite_bounded_and_populated`.
+5. **Pool exhaustion:** a burst of splashes when particles are at their cap must drop items, not overflow or allocate. Test: Task 5 `test_pools_drop_when_full`.
 
 ---
 
@@ -140,135 +144,162 @@
 
 ---
 
-### Task 3: Fish kinematics: integrate, facing, edges, wander
+
+### Task 3: Tuning v2, palette data and fish kinematics
 
 **Files:**
-- Create: `lib/tanksim/fish.h`, `lib/tanksim/fish.cpp`
+- Modify: `lib/tanksim/tuning.h` (DESIGN §6 defaults; add `FxTuning`, world constants), `test/test_tuning/test_main.cpp` (pin both structs' order)
+- Create: `lib/tanksim/palette.h`, `lib/tanksim/fish.h`, `lib/tanksim/fish.cpp`
 - Test: `test/test_fish/test_main.cpp`
 
 **Interfaces:**
-- Consumes: `Vec2`, `Rng`, `Tuning`, `Bounds`, `Layer` (Task 2).
+- Consumes: `Vec2`, `Rng` (Task 2).
 - Produces:
-  - `struct tank::Fish { Vec2 pos, vel; Layer layer; uint8_t species; float wanderAngle; bool facingRight; };`
-  - `void tank::integrate(Fish& f, Vec2 steering, float dt, float maxSpeed, float maxForce);` Caps the steering at `maxForce`, then `vel += steering*dt`, caps `vel` at `maxSpeed`, then `pos += vel*dt`.
-  - `void tank::updateFacing(Fish& f, float threshold);` Sets `facingRight = vel.x > 0` only when `|vel.x| > threshold`.
-  - `Vec2 tank::steerEdges(const Fish& f, const Bounds& b, const Tuning& t);` For each axis, within `edgeMargin` of a wall, pushes inward with magnitude `edgeWeight * maxForce * clamp((edgeMargin - dist)/edgeMargin, 0, 1)`. Past the wall (`dist < 0`) the factor is 1. Zero in the interior.
-  - `Vec2 tank::steerWander(Fish& f, Rng& rng, float dt, const Tuning& t);` Does `wanderAngle += rng.uniform(-1,1) * wanderJitter * dt` and returns `{cos, sin}(wanderAngle) * wanderWeight * maxForce`.
+  - `tuning.h`: `Tuning` (core, same field order, new defaults), `FxTuning` (DESIGN §6 order). Constants: `kScreen`, `kSurfaceY = 20`, `kFloorY = 210` (bottom edge for fish = H − 30), `kGravity = 170`, `kCellW = 6`, `kCellH = 8`, `kFontScale[3] = {1, 1.5, 2}`, `kGlyphLen[3] = {3, 5, 7}`, `kMaxFish = 24`, `kHomeMin = 52`, `kHomeMax = 192`, `kLeapVy = 100`.
+  - `palette.h`: `kFishPalette[7][2]`, `kReefColors[7]`, `SceneColors kScene` (RGB888 `uint32_t`, values from DESIGN §4 and the prototype).
+  - `fish.h`: `struct Fish` (`pos, vel, layer, palette, id, facingRight, airborne, away, crossing, leaving, sideWalls, flipTurn, turnSwapped, wanderAngle, wavePhase, tilt, turnP, boostT, leapT, flipCooldown, reverseT, homeBase, homeY, returnT, body[7], bodyN`) and these functions:
+    - `charAdvance(Layer)`, `bodyLength(Layer)`
+    - `rigidBody(const Fish&, int n, float spacing, float squeeze, Vec2* out)`
+    - `flipSqueeze(const Fish&)`
+    - `steerEdges(const Fish&, const Tuning&)`
+    - `steerWander(Fish&, Rng&, float dt, const Tuning&)` (Reynolds: circle radius 1, 2 ahead)
+    - `steerLevel(Fish&, Rng&, float dt, const FxTuning&)` (homeY drift + level/depth pull)
+    - `prioritize(Vec2 others, Vec2 edges, float boostMul, const Tuning&, float* edgeFrac)`
+    - `swim(Fish&, Vec2 force, Vec2 nav, float edgeFrac, float dt, const Tuning&, const FxTuning&)` (turn-rate and pitch limits, minimum speed, flip trigger with debounce and cooldown, leap and airborne cases)
+    - `advanceTurn(Fish&, float dt, const Tuning&, const FxTuning&)` (flip animation, safety net, tilt smoothing)
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing tests** (`test_fish`)
   ```cpp
-  void test_integrate_never_exceeds_max_speed()  // steering {1e6,1e6}, 100 steps of 1/60: vel.length() <= 28 + 1e-3
-  void test_integrate_moves_by_velocity()        // vel {10,0}, zero steering, dt 0.5: pos.x advanced by 5
-  void test_facing_hysteresis_holds_below_threshold() {  // Review Focus #3
-    tank::Fish f{}; f.facingRight = true; f.vel = {-2.f, 20.f};
-    tank::updateFacing(f, 3.f); TEST_ASSERT_TRUE(f.facingRight);
-    f.vel = {-4.f, 0.f}; tank::updateFacing(f, 3.f); TEST_ASSERT_FALSE(f.facingRight);
-  }
-  void test_edges_zero_in_interior()             // pos {160,120}: steerEdges == {0,0}
-  void test_edges_push_inward_near_left_wall()   // pos {5,120}: x > 0, y == 0
-  void test_edges_push_inward_past_right_wall()  // pos {330,120}: x == -(edgeWeight*maxForce)
-  void test_wander_magnitude_is_weight_times_force()  // length == wanderWeight*maxForce within 1e-4
-  void test_wander_deterministic_for_seed()      // two Rng(7) and identical fish: equal outputs over 50 calls
+  test_tuning_order_pins_core_and_fx          // positional initializers == defaults (in test_tuning)
+  test_rigid_body_is_straight_row_behind_head // facing right, tilt 0: x = pos.x − j·spacing, y == pos.y
+  test_rigid_body_squeezes_about_middle        // squeeze 0.5: middle point unchanged, ends at half distance
+  test_edges_zero_in_interior_and_sides_gated  // sideWalls=false near x=5 → x force 0; true → > 0
+  test_edges_ignore_surface_while_leaping
+  test_wander_never_points_backward           // 2,000 calls: angle(force, vel) ≤ 30.1°
+  test_prioritize_scales_others_near_walls    // edges at full strength → others limited to 0.4·maxForce, edgeFrac == 1
+  test_swim_turn_rate_is_limited              // force straight up: heading change per step ≤ maxTurnRate·dt·(1+e)
+  test_swim_pitch_is_limited                  // after 200 steps of upward force: |pitch| ≤ maxPitch + 1e-3
+  test_swim_keeps_min_speed                   // zero force: speed ≥ minSpeedFrac·maxSpeed
+  test_reversal_starts_flip_after_debounce    // nav straight back: no flip at 0.2 s, flip by 0.3 s
+  test_flip_reverses_at_midpoint              // vx sign and facing flip exactly once, when turnP crosses 0.5
+  test_flip_cooldown_blocks_unless_wall       // second reversal within 3 s blocked; allowed when edgeFrac > 0.3
+  test_safety_net_starts_flip_on_mismatch     // facingRight with vx < −threshold → flip starts, never an instant swap
+  test_tilt_limited_and_smoothed              // steady dive: |tilt| ≤ maxTilt; first step moves ≤ dt·4 of the gap
   ```
-- [ ] **Step 2: Run and confirm the tests fail.** `pio test -e native -f test_fish` gives compile errors.
-- [ ] **Step 3: Implement** `fish.h` and `fish.cpp` to the Interfaces above.
-- [ ] **Step 4: Run and confirm the tests pass.** `pio test -e native -f test_fish` gives 8/8 PASSED.
-- [ ] **Step 5: Commit** `git commit -m "feat(tanksim): fish integration, facing hysteresis, edge + wander steering"`
+- [ ] **Step 2: Run, confirm they fail:** `pio test -e native -f test_fish -f test_tuning`
+- [ ] **Step 3: Implement**: port `steerEdges`, `steerWander`, the level/depth force, the force mixing, the swim integration and the turn/tilt block from `prototype/index.html` `step()`.
+- [ ] **Step 4: Run, confirm they pass**, plus the full suite with no warnings.
+- [ ] **Step 5: Commit** `feat(tanksim): tuning v2, palettes, fish kinematics (rigid body, flip-turns, wall priority)`
 
 ---
 
-### Task 4: Schooling (boids). **Owner: human (learning task)**
+### Task 4: Schooling. **Owner: human (learning task)**
 
 **Files:**
-- Create: `lib/tanksim/school.h`, `lib/tanksim/school.cpp`
-- Test: `test/test_school/test_main.cpp`
+- Create: `lib/tanksim/school.h`, `lib/tanksim/school.cpp` (the assistant writes a stub that returns `{}`, marked `TODO(human)`)
+- Test: `test/test_school/test_main.cpp` (written by the assistant; fails until the human implements it)
 
 **Interfaces:**
-- Consumes: `Fish`, `Tuning`, `Vec2` (Tasks 2 and 3).
-- Produces: `Vec2 tank::steerSchool(const Fish& self, const std::vector<Fish>& all, const Tuning& t);` Considers only fish in the **same layer** within `neighborRadius`, skipping `self` by address (`&other == &self`). Returns `separationWeight*sep + alignmentWeight*ali + cohesionWeight*coh`. It does not cap the result; `integrate` does.
+- Consumes: `Fish` (with `body[]`/`bodyN` filled), `Tuning`, `FxTuning`.
+- Produces: `Vec2 steerSchool(const Fish& self, const Fish* fish, int count, const Tuning& t, const FxTuning& fx);` It skips `self` (by address), `away` fish and `airborne` fish. Same-layer separation is measured to the **nearest body point** within `separationRadius × {0.7, 1.0, 1.35}[layer]`. Fish in other layers get spacing at `0.7×` that radius, weighted by `layerSpacing`. Alignment and cohesion use same-layer fish whose **heads** are within `neighborRadius`. Each component is a Reynolds "seek" (`normalize(dir)·maxSpeed[layer] − vel`, or zero for a zero direction), combined with the three weights.
 
-- [ ] **Step 1: Write the failing tests** (the assistant writes these)
+- [ ] **Step 1: Tests**
   ```cpp
-  void test_school_lone_fish_is_zero()
-  void test_school_ignores_other_layers()      // neighbor 5px away in a different layer: result {0,0}
-  void test_school_ignores_far_neighbors()     // same-layer neighbor 100px away: {0,0}
-  void test_school_separation_pushes_away()    // only separationWeight=1, neighbor 5px to the right: result.x < 0
-  void test_school_alignment_matches_heading() // only alignmentWeight=1, self vel {0,0}, neighbor 20px away with vel {10,0}: result.x > 0
-  void test_school_cohesion_pulls_toward_center()  // only cohesionWeight=1, neighbor 30px to the right: result.x > 0
-  void test_school_coincident_fish_is_finite() // Review Focus #1: two fish at the same pos, all weights 1: isfinite(x) && isfinite(y)
+  test_school_lone_fish_is_zero
+  test_school_ignores_away_and_airborne
+  test_school_separation_pushes_away_from_body   // neighbour's head far, its TAIL 6 px away → push away from the tail
+  test_school_cross_layer_push_is_weaker         // same geometry, other layer → nonzero and smaller than same-layer
+  test_school_alignment_matches_heading          // only alignment: neighbour moving +x, self still → x > 0
+  test_school_cohesion_pulls_toward_center       // only cohesion: neighbour 40 px right → x > 0
+  test_school_far_neighbors_ignored              // > neighborRadius and beyond separation → {0,0}
+  test_school_coincident_fish_is_finite          // Review Focus #1
   ```
-- [ ] **Step 2: Run and confirm the tests fail.** `pio test -e native -f test_school`
-- [ ] **Step 3: The human implements `steerSchool`** (Learn by Doing). Decisions for the human: how separation scales with distance (1/d, 1/d² or linear falloff); whether each component is a raw average or Reynolds' "desired velocity minus current velocity"; how to guard the coincident case.
-- [ ] **Step 4: Run and confirm the tests pass.** 7/7 PASSED.
-- [ ] **Step 5: Commit** `git commit -m "feat(tanksim): per-layer boids schooling"`
+- [ ] **Step 2: Run, confirm they fail** (stub).
+- [ ] **Step 3: The human implements `steerSchool`.** It's a Learn by Doing task; the prototype's JS `steerSchool` is the behavioral reference.
+- [ ] **Step 4: All 8 pass; full suite green.**
+- [ ] **Step 5: Commit** `feat(tanksim): body-aware schooling`
+
+Tasks 5–6 don't wait for this: the stub returns `{}` (fish without schooling), and their test gates run `pio test -e native -i test_school` until Task 4 lands.
 
 ---
 
-### Task 5: Ambient life, the Tank world and the fixed timestep
+### Task 5: Ambient life, seabed and the `Tank` world
 
 **Files:**
-- Create: `lib/tanksim/ambient.h`, `lib/tanksim/ambient.cpp`, `lib/tanksim/stepper.h`, `lib/tanksim/tank.h`, `lib/tanksim/tank.cpp`
-- Test: `test/test_ambient/test_main.cpp`, `test/test_tank/test_main.cpp`
+- Create: `lib/tanksim/pool.h`, `lib/tanksim/ambient.h`, `lib/tanksim/ambient.cpp`, `lib/tanksim/seabed.h`, `lib/tanksim/seabed.cpp`, `lib/tanksim/stepper.h`, `lib/tanksim/tank.h`, `lib/tanksim/tank.cpp`
+- Test: `test/test_ambient/test_main.cpp`, `test/test_seabed/test_main.cpp`, `test/test_tank/test_main.cpp`
 
 **Interfaces:**
-- Consumes: everything from Tasks 2, 3 and 4.
+- Consumes: Tasks 2–4.
 - Produces:
-  - `struct tank::Bubble { Vec2 pos; float phase; float rise; };`
-  - `struct tank::Seaweed { float x; float height; float phase; };`
-  - `Vec2 tank::bubbleDrawPos(const Bubble& b, float t, const Tuning& tu);` Returns `pos` plus an x offset of `bubbleWobbleAmp * sin(2π·bubbleWobbleHz·t + phase)`.
-  - `float tank::seaweedSway(float heightFrac, float t, float phase, const Tuning& tu);` Equals `seaweedSwayAmp * heightFrac² * (0.7·sin(2π·hz[0]·t + phase) + 0.3·sin(2π·hz[1]·t + 1.7·phase))`.
-  - `class tank::FixedStepper { public: FixedStepper(float stepSec, int maxSteps); int advance(float elapsedSec); };` Returns the number of steps to run. When the count exceeds `maxSteps`, it returns `maxSteps` and resets the accumulator to 0.
-  - `class tank::Tank { public: Tank(Bounds b, const Tuning& t, uint32_t seed); void step(float dt); const std::vector<Fish>& fish() const; const std::vector<Bubble>& bubbles() const; const std::vector<Seaweed>& seaweed() const; float time() const; const Bounds& bounds() const; const Tuning& tuning() const; };`
-  - The constructor spawns `fishPerLayer[L]` fish per layer at uniform positions inside the edge margin, with a random heading at half the layer speed. It also creates 5 seaweed stalks and reserves 64 bubbles.
-  - `step()` first computes **every** fish's steering (school + edges + wander) from the current state, **then** integrates them all. This order keeps the result independent of fish order. Then: update facing; spawn bubbles from a rate accumulator at `y = h + 2`, `x ∈ [8, w-8]`, skipping spawns at capacity; move bubbles up at `rise`; remove those with `y < -4`; `time += dt`.
+  - `template <class T, int N> struct Pool` with `add(const T&) → bool` (false when full), `removeIf(pred)`, iteration and `count`.
+  - `Bubble`, `Particle {pos, vel, life, maxLife, rgb, ch, kind}`, `Ripple {x, t0, amp}`, `Plankton {pos, vel, phase, rgb}`.
+  - `seaweedSway(hf, t, phase, Tuning)`, `surfaceAt(ripples, x, t)`.
+  - `RockCell {x, y, ch, top, moss}`, `Rock {x, w, h, tone, lMul, hueShift, star, cells[64], cellN}`, `Seaweed`, `Coral {x, tpl, color, phase}`, `Sand`, `Ray`, `Seabed`, `buildSeabed(Rng&, Seabed&)` (pack rocks/weeds/coral left→right with even gaps, as in the prototype), `kCoral[5]` templates.
+  - `FixedStepper(stepSec, maxSteps).advance(elapsed) → int`.
+  - `class Tank { Tank(const Tuning&, const FxTuning&, uint32_t seed); void step(float dt); fish() / fishCount() / bubbles() / particles() / ripples() / plankton() / seabed() / time() / tuning() / fx() / awayCount(); bool tryLeap(); }`. `step()` ports the prototype's `step()`: the away cap and side walls, a force snapshot, `prioritize`, `swim`, `advanceTurn`, body points, the crossing/away/re-enter logic, darts (only when the water ahead is clear), leaps, splashes, bubbles, particles, ripples and plankton. No taps (that's the v2 feed button).
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Tests**
   ```cpp
-  // test_ambient
-  void test_seaweed_root_does_not_move()       // heightFrac 0, any t: 0
-  void test_seaweed_sway_bounded_by_amp()      // heightFrac 1, t over 0..60 s in 0.01 steps: |sway| <= seaweedSwayAmp
-  void test_bubble_wobble_bounded()            // |bubbleDrawPos.x - pos.x| <= bubbleWobbleAmp
-  // test_tank
-  void test_tank_spawns_fish_per_layer()       // counts per layer == {6, 5, 3}
-  void test_stepper_runs_whole_steps()         // FixedStepper(1/60, 5).advance(0.034f) == 2
-  void test_stepper_caps_steps_and_drops_excess() { // Review Focus #2
-    tank::FixedStepper s(1.f/60.f, 5);
-    TEST_ASSERT_EQUAL(5, s.advance(1.0f)); TEST_ASSERT_EQUAL(0, s.advance(0.0f));
-  }
-  void test_bubbles_rise_and_despawn()         // run 20 s: some bubbles spawned; every live bubble has y in [-4, h+2]
-  void test_same_seed_is_deterministic()       // two Tank(seed 42), 600 steps: all fish pos bit-identical
-  void test_soak_100k_steps_finite_and_bounded()  // Review Focus #4: seed 42, 100,000 steps:
-                                                  //   every fish pos finite and in [-edgeMargin, w+edgeMargin] x [-edgeMargin, h+edgeMargin]
+  // ambient
+  test_pool_add_fails_when_full_and_remove_compacts
+  test_seaweed_root_fixed_and_sway_bounded
+  test_surface_flat_without_ripples_and_bounded_with
+  // seabed
+  test_seabed_pieces_never_overlap_for_50_seeds          // packing invariant
+  test_rock_cells_follow_outline                         // top cells use / \ -, cells inside rock height
+  // tank
+  test_tank_spawns_per_layer_counts_and_stratified_depths
+  test_stepper_runs_whole_steps
+  test_stepper_caps_steps_and_drops_excess               // Review Focus #2
+  test_same_seed_is_deterministic                        // 600 steps, bit-identical fish
+  test_fish_leave_and_return                             // within 3 sim-min: ≥1 fish goes away and comes back ≤ returnDelayMax + 0.1 s
+  test_away_cap_holds                                    // away ≤ floor(maxAwayFrac·N) + 1 at every step
+  test_leap_goes_airborne_and_splashes                   // tryLeap() → airborne within 1 s, particles > 0
+  test_pools_drop_when_full                              // Review Focus #5
+  test_soak_facing_always_matches                        // Review Focus #3
+  test_soak_100k_steps_finite_bounded_and_populated      // Review Focus #4: no NaN, y ∈ [−60, 240], on-screen ≥ 1 always, every away fish returns
   ```
-- [ ] **Step 2: Run and confirm the tests fail.** `pio test -e native -f test_ambient -f test_tank`
-- [ ] **Step 3: Implement** `ambient`, `stepper.h` (header-only) and `tank` to the Interfaces above.
-- [ ] **Step 4: Run and confirm the tests pass.** `pio test -e native` shows every suite PASSED, with the soak test under 10 s on a laptop.
-- [ ] **Step 5: Commit** `git commit -m "feat(tanksim): bubbles, seaweed, Tank world, fixed-timestep stepper + soak test"`
+- [ ] **Step 2: Run, confirm they fail.**
+- [ ] **Step 3: Implement** by porting the prototype.
+- [ ] **Step 4:** `pio test -e native -i test_school` all pass (school excluded until Task 4), no warnings.
+- [ ] **Step 5: Commit** `feat(tanksim): Tank world — ambient life, seabed, coming & going, leaps`
 
 ---
 
-### Task 6: Display, renderer and main loop in Wokwi
+### Task 6: Framebuffer renderer, firmware and Wokwi
 
 **Files:**
-- Create: `src/display/lgfx_config.h`, `src/render/palette.h`, `src/render/renderer.h`, `src/render/renderer.cpp`, `wokwi.toml`, `diagram.json`
-- Modify: `src/main.cpp` (replace the Task 2 placeholder)
+- Create: `lib/tankrender/glyphs.h`, `lib/tankrender/glyphs.cpp`, `lib/tankrender/color.h`, `lib/tankrender/frame.h`, `lib/tankrender/background.h`, `lib/tankrender/background.cpp`, `lib/tankrender/renderer.h`, `lib/tankrender/renderer.cpp`
+- Create: `src/display/lgfx_config.h`, `wokwi.toml`, `diagram.json`. Modify: `src/main.cpp`
+- Test: `test/test_render/test_main.cpp`
 
 **Interfaces:**
-- Consumes: `tank::Tank`, `tank::FixedStepper` (Task 5); `kLayerColor` from the Task 1 export.
+- Consumes: `tank::Tank` and the sim data types.
 - Produces:
-  - `class LGFX : public lgfx::LGFX_Device` with `Panel_ILI9341`, `Bus_SPI` (SPI2_HOST, 40 MHz write, DMA channel `SPI_DMA_CH_AUTO`) and `Light_PWM` on GPIO 21. Pins as in DESIGN §9.
-  - `class Renderer { public: bool begin(bool mirrored); void draw(const tank::Tank& t); uint32_t lastDrawMicros() const; uint32_t lastPushMicros() const; };`
-  - `begin()` allocates a 320×240 16-bit `LGFX_Sprite`, trying PSRAM first and then internal SRAM. It returns `false` if both fail. `mirrored` selects a mirrored rotation (4–7).
-  - `draw()` clears to black, then draws seaweed, then Far, Mid and Near fish (glyph by `facingRight`, color `kLayerColor[layer]`), then bubbles (`o`, or a 1–2 px circle), then `pushSprite(0,0)`.
-- `main.cpp`: in `setup()`, start Serial at 115200; call `renderer.begin(true)` and halt with a serial error if it fails; build the `Tank` with seed `esp_random()`; enable the task watchdog (5 s, using the API for the installed Arduino core). In `loop()`: `n = stepper.advance(elapsed)`; run `tank.step(1/60)` n times; `renderer.draw(tank)`; reset the watchdog. Every 5 s, log `fps=<f> draw_us=<u> push_us=<u> heap=<u> psram=<u>`.
+  - `glyphRows(char) → const uint8_t*` (7 rows, the prototype's `GLYPH_ART`, or null for unknown or space)
+  - `rgb565()`, `hsl565()`, `rgbToHsl()`
+  - `struct Frame { uint16_t* px; int w, h; uint32_t glyphs, writes; blit(ch, cx, cy, scale, color); plot(); addRgb(); }`
+  - `buildBackground(uint16_t* out, const FxTuning&)` (Bayer-dithered RGB565, black edges)
+  - `renderFrame(const Tank&, const uint16_t* background, Frame&)` (a port of `drawDevice`)
+- Firmware (`src/main.cpp`): framebuffer `heap_caps_malloc(…, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)` with a PSRAM fallback; background in PSRAM; a `Tank` seeded with `esp_random()`; a `FixedStepper` driving the 60 Hz sim; `renderFrame` → `lcd.pushImage`; a 5 s task watchdog; and a 5 s log line `fps=… render_us=… push_us=… glyphs=… heap=… psram=…`.
 
-- [ ] **Step 1: Write `wokwi.toml`** pointing `firmware` and `elf` at `.pio/build/esp32s3/firmware.bin` and `.elf`. Write `diagram.json` with `board-esp32-s3-devkitc-1` and `wokwi-ili9341`, wired as in DESIGN §9 (LED to GPIO 21).
-- [ ] **Step 2: Implement** `lgfx_config.h`, `palette.h`, `renderer`, `main.cpp`.
-- [ ] **Step 3: Build.** Run: `pio run -e esp32s3`. Expected: SUCCESS, with no warnings from `lib/tanksim`.
-- [ ] **Step 4: Run in Wokwi.** VS Code: "Wokwi: Start Simulator". Expected: a black screen showing 3 visibly separate layers of schooling fish, swaying seaweed and rising bubbles; the image is mirrored (text reads backwards, which is correct for Pepper's Ghost); serial prints an `fps=` line every 5 s. Wokwi's fps is **not** the real target; it gets measured on hardware in Phase 1 (ADR 0004).
-- [ ] **Step 5: Record a GIF** of the Wokwi run (with mirroring off, so it's readable) to `docs/media/phase0-wokwi.gif` and embed it in the README.
-- [ ] **Step 6: Tick the Phase 0 boxes in `docs/ROADMAP.md` and commit**
-  ```bash
-  git add src/ wokwi.toml diagram.json docs/
-  git commit -m "feat(firmware): LovyanGFX sprite renderer + fixed-step main loop in Wokwi"
+- [ ] **Step 1: Tests**
+  ```cpp
+  test_glyph_table_covers_every_scene_character   // every char used by fish, coral, rocks, sand, particles, surface
+  test_blit_writes_expected_pixels_and_clips      // '|' at scale 1 → 7 px in one column; off-screen blit writes 0 px
+  test_blit_fractional_scale_covers_scaled_box    // scale 2 '#' writes 4× the pixels of scale 1
+  test_background_edges_are_black                 // whole border ring == 0x0000, and everything above the surface
+  test_background_has_glow_inside                 // centre pixel non-black
+  test_render_frame_is_deterministic              // same seed + steps → identical frame
+  test_render_budget                              // after 600 steps: glyphs ≤ 450 per frame
+  test_render_snapshot (optional)                 // if GHOST_SNAPSHOT is set, write frame to .pio/snapshot.ppm for a visual check
   ```
+- [ ] **Step 2: Run, confirm they fail.**
+- [ ] **Step 3: Implement** the renderer (port `drawDevice`), then the firmware and the Wokwi files (ESP32-S3 + ILI9341 wired as in DESIGN §9).
+- [ ] **Step 4: Verify:**
+  - `pio test -e native -i test_school` passes.
+  - `GHOST_SNAPSHOT=1 pio test -e native -f test_render` writes a snapshot that matches the prototype's device preview (checked by eye).
+  - `pio run -e esp32s3` succeeds.
+  - Wokwi run: fish visible and mirrored; serial `fps=` lines. This needs the Wokwi VS Code extension or a `WOKWI_CLI_TOKEN`; otherwise the step is deferred to the human.
+- [ ] **Step 5: Tick the ROADMAP boxes that are actually done, and commit** `feat: framebuffer renderer + firmware main loop (Wokwi-ready)`

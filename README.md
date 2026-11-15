@@ -24,13 +24,13 @@ Light from the screen reflects off the angled sheet toward your eye. Black pixel
 
 | Area | Approach |
 |---|---|
-| **Smooth motion** | Fish have float positions and velocities and are drawn at exact pixel positions, not snapped to a text grid. Steering behaviors (separation, alignment, cohesion, wander, edge avoidance) produce schooling. |
-| **No flicker or tearing** | Each frame is drawn into an off-screen sprite in PSRAM, then pushed to the display with DMA. The frame-time budget is worked out from the SPI bandwidth: [DESIGN §8](docs/DESIGN.md#8-performance-targets). |
-| **Stable simulation** | A fixed 60 Hz timestep runs separately from the render rate, with a cap on catch-up steps, so a stalled frame never makes fish teleport. |
-| **Depth** | Three layers. Far fish are dimmer, slower and bluer. In a Pepper's Ghost box this reads as real depth. |
-| **Testable firmware** | All of the simulation is a hardware-free C++ library, unit-tested on a laptop with PlatformIO's `native` environment and run in CI on every push. |
-| **Simulator first** | Every feature is tested in the [Wokwi](https://wokwi.com) ESP32 simulator before it goes onto the hardware. |
-| **Built for 24/7** | Task watchdog, no heap allocation per frame, deterministic seeded randomness, and a night-dimming brightness schedule. |
+| **Legible, calm motion** | Fish are rigid ASCII rows on float positions, steered by wander, schooling, wall and depth forces. Reversal is always an animated flip-turn, never a bent or folded body. Fish swim out of view and return a few seconds later. Every rule was measured in the prototype ([ADR 0009](docs/adr/0009-motion-model.md)). |
+| **Designed against the real hardware** | The browser prototype's default view is a software renderer that reproduces the device exactly: an RGB565 framebuffer, a 5×7 bitmap font, whole-pixel positions and 30 fps. It is the reference for the C++ renderer ([ADR 0008](docs/adr/0008-device-render-pipeline-and-budgets.md)). |
+| **No flicker or tearing** | Each frame is rebuilt off-screen from a pre-rendered, Bayer-dithered background, then pushed whole. The budget is about 290 glyph blits per frame against a 31 ms SPI push ([DESIGN §8](docs/DESIGN.md#8-performance-budget-adr-0008)). |
+| **Made for the reflector** | Black is invisible on the glass, so the water glow fades to pure black at every screen edge and no effect leaves gray residue. The panel mirrors the image in hardware. |
+| **Stable simulation** | A fixed 60 Hz timestep, separate from the render rate, with capped catch-up steps. Deterministic for a given seed. |
+| **Testable firmware** | Simulation (`lib/tanksim`) and rendering (`lib/tankrender`) are hardware-free C++ libraries, unit-tested on a laptop (soak tests, determinism, invariants) and run in CI on every push. |
+| **Built for 24/7** | Task watchdog, fixed-capacity pools (no heap allocation per frame), deterministic seeded randomness. |
 
 ## Tech stack
 
@@ -39,10 +39,11 @@ C++17 · ESP32-S3 (Arduino on ESP-IDF) · [LovyanGFX](https://github.com/lovyan0
 ## Repository layout (target)
 
 ```
-lib/tanksim/        Hardware-free simulation: fish, schooling, bubbles, seaweed, timestep
-src/                Firmware: display config, renderer, main loop
-test/test_sim/      Unit tests for tanksim (run on the laptop)
-prototype/          Browser canvas prototype for tuning motion and color
+lib/tanksim/        Hardware-free simulation: fish, schooling, coming & going, ambient life, seabed
+lib/tankrender/     Hardware-free RGB565 framebuffer renderer (port of the prototype's device preview)
+src/                Firmware: display config, memory, 60 Hz stepper, push to the panel
+test/               Unit tests for both libraries (run on the laptop and in CI)
+prototype/          Browser tuner: device-accurate preview + sliders + "Copy as C++"
 hardware/           CAD for the base, reflector dimensions, wiring
 docs/               Design spec, roadmap, ADRs, implementation plans
 ```
