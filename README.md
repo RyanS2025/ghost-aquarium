@@ -80,6 +80,8 @@ CI runs the tests and the firmware build on every push, plus the Wokwi boot chec
 |---|---|
 | [Design spec](docs/DESIGN.md) | What the tank does and looks like: scene, motion rules, tuning values, hardware, constraints |
 | [Roadmap](docs/ROADMAP.md) | Phases, hardware milestones, current progress |
+| [Parts list](docs/BUY.md) | What to buy for the hardware build, with links |
+| [v2 spec](docs/specs/v2-interaction.md) | Feed button, living tank, phone control, weather link |
 | [Architecture decisions](docs/adr/) | Why each technical choice was made, and the alternatives that were rejected |
 | [Phase 0 plan](docs/plans/2026-11-14-phase0-sim-and-renderer.md) | Task-by-task implementation plan for the simulation and renderer |
 
