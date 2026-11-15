@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Ghost: check everything (tests + build + snapshot)", "type": "shell", "command": "make check", "group": { "kind": "build", "isDefault": true }, "problemMatcher": [] },
+    { "label": "Ghost: run all tests", "type": "shell", "command": "make test", "group": "test", "problemMatcher": [] },
+    { "label": "Ghost: build firmware for the simulator (un-mirrored)", "type": "shell", "command": "make build-sim", "problemMatcher": [] },
+    { "label": "Ghost: headless Wokwi run (needs WOKWI_CLI_TOKEN)", "type": "shell", "command": "make sim", "problemMatcher": [] },
+    { "label": "Ghost: render a snapshot frame", "type": "shell", "command": "make snapshot", "problemMatcher": [] },
+    { "label": "Ghost: open the browser tuner", "type": "shell", "command": "make prototype", "isBackground": true, "problemMatcher": [] },
+    { "label": "Ghost: flash + monitor real hardware", "type": "shell", "command": "make flash monitor", "problemMatcher": [] }
+  ]
+}

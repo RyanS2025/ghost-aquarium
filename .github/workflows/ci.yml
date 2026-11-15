@@ -28,3 +28,47 @@ jobs:
 
       - name: Firmware build (ESP32-S3)
         run: pio run -e esp32s3
+
+  # Boots the real firmware in the Wokwi simulator and waits for the stats line.
+  # Runs only when the repo has a WOKWI_CLI_TOKEN secret (free: https://wokwi.com/dashboard/ci).
+  simulate:
+    runs-on: ubuntu-latest
+    env:
+      WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware (un-mirrored for the simulator)
+        run: pio run -e esp32s3
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DGHOST_MIRROR=0
+
+      - name: Run in Wokwi (expects an fps= stats line)
+        if: env.WOKWI_CLI_TOKEN != ''
+        uses: wokwi/wokwi-ci-action@v1
+        with:
+          token: ${{ secrets.WOKWI_CLI_TOKEN }}
+          timeout: 20000
+          expect_text: "fps="
+          serial_log_file: wokwi-serial.log
+
+      - name: Upload serial log
+        if: always() && env.WOKWI_CLI_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: wokwi-serial-log
+          path: wokwi-serial.log
+          if-no-files-found: ignore

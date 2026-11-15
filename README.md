@@ -50,13 +50,17 @@ docs/               Design spec, roadmap, ADRs, implementation plans
 
 ## Build and run
 
-*Coming in Phase 0, see the [plan](docs/plans/2026-11-14-phase0-sim-and-renderer.md).*
+Every workflow is one command (`make help` lists them). They're also VS Code tasks (⇧⌘B runs `make check`).
 
-```bash
-pio test -e native      # run the simulation unit tests on your machine
-pio run  -e esp32s3     # build the firmware
-# then run it in Wokwi: VS Code → "Wokwi: Start Simulator"
-```
+| Command | What it does |
+|---|---|
+| `make setup` | Installs PlatformIO and checks the Wokwi simulator setup |
+| `make check` | Laptop tests, firmware build and a rendered snapshot frame: everything that needs no hardware |
+| `make prototype` | Opens the browser tuner (device-accurate preview, sliders, "Copy as C++") |
+| `make sim` | Boots the real firmware in Wokwi headlessly and checks it reports frame stats (needs a free `WOKWI_CLI_TOKEN`) |
+| `make flash monitor` | Uploads to a connected ESP32-S3 and shows its fps/render/push stats |
+
+CI runs the tests and the firmware build on every push, plus the Wokwi boot check when the repo has a `WOKWI_CLI_TOKEN` secret.
 
 ## Documentation
 
