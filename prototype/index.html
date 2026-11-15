@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ghost Aquarium Tuner</title>
 <!--
-  Ghost Aquarium tuning prototype (ADR 0007), look v2: flowing bodies, vibrant palettes, splashes.
-  A JS stand-in for the motion model, used to choose the look by feel. Once the values are
-  exported, lib/tanksim (C++) is the source of truth.
+  Ghost Aquarium tuning prototype (ADR 0007), look v3:
+  smooth turns (turn-rate limit, body bend limit, turn animation), body-aware spacing,
+  and a vibrant scene (water glow with black edges, light rays, ASCII reef, bioluminescence).
+  A JS stand-in for the motion model; lib/tanksim (C++) becomes the source of truth after export.
   Single file, no build step, no external libraries.
 -->
 <style>
@@ -53,7 +54,7 @@
   .row label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row output { text-align: right; color: var(--muted); }
   .pal { display: grid; grid-template-columns: 1fr 34px 34px 70px; gap: 6px; align-items: center; margin: 3px 0; }
-  .pal input[type=color] { width: 34px; height: 22px; border: 1px solid var(--line); background: none; padding: 0; }
+  .pal input[type=color], .row input[type=color] { width: 34px; height: 22px; border: 1px solid var(--line); background: none; padding: 0; }
   .swatch { height: 10px; border-radius: 5px; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
   label.check { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
@@ -68,12 +69,13 @@
     border-radius: 4px; font: 11px/1.35 ui-monospace, Menlo, monospace; padding: 8px; resize: vertical;
   }
   #copied { color: var(--accent); min-height: 1.4em; }
+  .note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>GHOST AQUARIUM · TUNER</h1>
-  <p>320×240 logical · pure black is invisible in the reflection · tune by feel, then “Copy as C++”</p>
+  <p>320×240 logical · tune by feel, then “Copy as C++”</p>
 </header>
 <main>
   <section class="stage">
@@ -96,6 +98,7 @@
         <button id="reseed">Reseed</button>
         <button id="reset">Reset defaults</button>
       </div>
+      <p class="note">On the real reflector every lit pixel is visible. Background glow fades to black at the edges so the screen outline never shows; lower “bgGlow” for a cleaner ghost.</p>
     </fieldset>
     <div id="controls"></div>
     <fieldset>
@@ -129,45 +132,56 @@ const SPECIES = [                              // species index == layer in v1
   { right: "><((('>",  left: "<')))><" },
 ];
 const FONT_PX = [8, 10, 13];
-const MAX_PARTICLES = 320, MAX_RIPPLES = 24, BUBBLE_CAP = 64, HIST_CAP = 260;   // px of path kept: body + longest wake
-const SEAWEED_COUNT = 6, SEAWEED_SEG_PX = 7, PLANKTON = 36;
+const ADV = FONT_PX.map((p) => p * 0.62);     // monospace character advance
+const BODY_SPACE = [0.7, 1.0, 1.35];          // separation scales with body size per layer
+const MAX_PARTICLES = 320, MAX_RIPPLES = 24, BUBBLE_CAP = 64, HIST_CAP = 260;
+const SEAWEED_COUNT = 5, SEAWEED_SEG_PX = 7, PLANKTON = 44;
 const TAU = Math.PI * 2;
-const HOME_MIN = SURFACE_Y + 35, HOME_MAX = H - 35;
+const HOME_MIN = SURFACE_Y + 32, HOME_MAX = H - 48;   // fish stay above the reef
 
 // Core fields: ORDER MUST match struct tank::Tuning in lib/tanksim/tuning.h.
-// Fields with fx:true are new in look v2 and get exported as a separate draft block.
+// fx:true fields are new (look v2/v3) and export as a separate draft block.
 const FIELDS = [
-  { k: "maxSpeed",         g: "Motion",    def: [18, 30, 44], min: 2, max: 90, step: 1, sub: LAYER_NAMES },
-  { k: "maxForce",         g: "Motion",    def: 38,  min: 2,  max: 150, step: 1 },
-  { k: "neighborRadius",   g: "Schooling", def: 56,  min: 4,  max: 140, step: 1 },
-  { k: "separationRadius", g: "Schooling", def: 30,  min: 2,  max: 80,  step: 1 },
-  { k: "cohesionWeight",   g: "Schooling", def: 0.5, min: 0,  max: 4,   step: 0.05 },
+  { k: "maxSpeed",         g: "Motion",    def: [16, 26, 38], min: 2, max: 90, step: 1, sub: LAYER_NAMES },
+  { k: "maxForce",         g: "Motion",    def: 40,  min: 2,  max: 150, step: 1 },
+  { k: "neighborRadius",   g: "Schooling", def: 60,  min: 4,  max: 140, step: 1 },
+  { k: "separationRadius", g: "Schooling", def: 26,  min: 2,  max: 80,  step: 1 },
+  { k: "cohesionWeight",   g: "Schooling", def: 0.35, min: 0, max: 4,   step: 0.05 },
   { k: "alignmentWeight",  g: "Schooling", def: 1.0, min: 0,  max: 4,   step: 0.05 },
-  { k: "separationWeight", g: "Schooling", def: 1.8, min: 0,  max: 4,   step: 0.05 },
-  { k: "wanderWeight",     g: "Wander & edges", def: 0.9, min: 0, max: 3,  step: 0.05 },
-  { k: "wanderJitter",     g: "Wander & edges", def: 2.4, min: 0, max: 12, step: 0.1 },
-  { k: "edgeMargin",       g: "Wander & edges", def: 30,  min: 4, max: 80, step: 1 },
-  { k: "edgeWeight",       g: "Wander & edges", def: 2.5, min: 0, max: 8,  step: 0.1 },
-  { k: "facingThreshold",  g: "Wander & edges", def: 3,   min: 0, max: 15, step: 0.5 },
-  { k: "fishPerLayer",     g: "Population", def: [6, 5, 3], min: 0, max: 20, step: 1, sub: LAYER_NAMES, int: true, respawn: true },
-  { k: "bubblesPerSec",    g: "Bubbles",   def: 1.5, min: 0,  max: 10,  step: 0.1 },
+  { k: "separationWeight", g: "Schooling", def: 2.2, min: 0,  max: 5,   step: 0.05 },
+  { k: "wanderWeight",     g: "Wander & edges", def: 0.8, min: 0, max: 3,  step: 0.05 },
+  { k: "wanderJitter",     g: "Wander & edges", def: 2.2, min: 0, max: 12, step: 0.1 },
+  { k: "edgeMargin",       g: "Wander & edges", def: 36,  min: 4, max: 80, step: 1 },
+  { k: "edgeWeight",       g: "Wander & edges", def: 2.8, min: 0, max: 8,  step: 0.1 },
+  { k: "facingThreshold",  g: "Wander & edges", def: 2,   min: 0, max: 15, step: 0.5 },
+  { k: "fishPerLayer",     g: "Population", def: [5, 4, 3], min: 0, max: 20, step: 1, sub: LAYER_NAMES, int: true, respawn: true },
+  { k: "bubblesPerSec",    g: "Bubbles",   def: 1.2, min: 0,  max: 10,  step: 0.1 },
   { k: "bubbleRise",       g: "Bubbles",   def: 25,  min: 2,  max: 80,  step: 1 },
   { k: "bubbleWobbleAmp",  g: "Bubbles",   def: 2,   min: 0,  max: 10,  step: 0.25 },
   { k: "bubbleWobbleHz",   g: "Bubbles",   def: 1.2, min: 0,  max: 5,   step: 0.05 },
   { k: "seaweedSwayAmp",   g: "Seaweed",   def: 7,   min: 0,  max: 20,  step: 0.5 },
   { k: "seaweedHz",        g: "Seaweed",   def: [0.31, 0.83], min: 0, max: 2, step: 0.01, sub: ["slow", "fast"] },
-  // ---- look v2 (draft; DESIGN update pending)
-  { k: "bodyWaveAmp",      g: "Flow", fx: true, def: 2.2,  min: 0, max: 8,   step: 0.1 },
+  // ---- new fields (draft; DESIGN update pending)
+  { k: "maxTurnRate",      g: "Turning", fx: true, def: 2.4,  min: 0.5, max: 8,  step: 0.1 },
+  { k: "bodyMaxBend",      g: "Turning", fx: true, def: 20,   min: 5,   max: 60, step: 1 },
+  { k: "turnTime",         g: "Turning", fx: true, def: 0.4,  min: 0.1, max: 1.2, step: 0.05 },
+  { k: "flipAngle",        g: "Turning", fx: true, def: 100,  min: 60,  max: 180, step: 5 },
+  { k: "maxPitch",         g: "Turning", fx: true, def: 40,   min: 15,  max: 85,  step: 1 },
+  { k: "minSpeedFrac",     g: "Turning", fx: true, def: 0.3,  min: 0,   max: 0.8, step: 0.05 },
+  { k: "bodyWaveAmp",      g: "Flow", fx: true, def: 1.5,  min: 0, max: 6,   step: 0.1 },
   { k: "bodyWaveHz",       g: "Flow", fx: true, def: 1.4,  min: 0, max: 5,   step: 0.05 },
   { k: "levelPull",        g: "Flow", fx: true, def: 0.7,  min: 0, max: 3,   step: 0.05 },
   { k: "depthPull",        g: "Flow", fx: true, def: 0.8,  min: 0, max: 2,   step: 0.05 },
+  { k: "layerSpacing",     g: "Flow", fx: true, def: 0.4,  min: 0, max: 2,   step: 0.05 },
   { k: "wakeLength",       g: "Flow", fx: true, def: 6,    min: 0, max: 16,  step: 1, int: true },
   { k: "vibrance",         g: "Color", fx: true, def: 1.0, min: 0, max: 1.6, step: 0.05 },
   { k: "shimmer",          g: "Color", fx: true, def: 0.12, min: 0, max: 0.4, step: 0.01 },
-  { k: "dartPerSec",       g: "Splashes", fx: true, def: 0.035, min: 0, max: 0.3, step: 0.005 },
-  { k: "leapPerSec",       g: "Splashes", fx: true, def: 0.08,  min: 0, max: 1,   step: 0.01 },
-  { k: "splashDroplets",   g: "Splashes", fx: true, def: 16,    min: 0, max: 48,  step: 1, int: true },
-  { k: "plankton",         g: "Splashes", fx: true, def: 1,     min: 0, max: 1,   step: 1, int: true },
+  { k: "bgGlow",           g: "Background", fx: true, def: 0.9, min: 0, max: 1.5, step: 0.05, rebuildBg: true },
+  { k: "rays",             g: "Background", fx: true, def: 0.7, min: 0, max: 1.5, step: 0.05 },
+  { k: "reef",             g: "Background", fx: true, def: 1,   min: 0, max: 1,   step: 1, int: true },
+  { k: "dartPerSec",       g: "Splashes", fx: true, def: 0.03, min: 0, max: 0.3, step: 0.005 },
+  { k: "leapPerSec",       g: "Splashes", fx: true, def: 0.08, min: 0, max: 1,   step: 0.01 },
+  { k: "splashDroplets",   g: "Splashes", fx: true, def: 16,   min: 0, max: 48,  step: 1, int: true },
 ];
 
 const DEFAULT_PALETTES = [                    // vibrant tropical, [head, tail]
@@ -179,10 +193,23 @@ const DEFAULT_PALETTES = [                    // vibrant tropical, [head, tail]
   ["#ff5e7a", "#ffc46b"],  // coral
   ["#5ad1ff", "#b07bff"],  // sky / lilac
 ];
-const DEFAULT_SCENE = { seaweedBase: "#0d5c3a", seaweedTip: "#7dff6a", bubble: "#9fe8ff", surface: "#2fb8ff", plankton: "#3a5f86" };
+const DEFAULT_SCENE = {
+  waterTop: "#0aa6c9", waterMid: "#2340b8", waterDeep: "#5a1a9a", ray: "#7fe8ff",
+  seaweedBase: "#0d5c3a", seaweedTip: "#7dff6a", sand: "#d9a35f", rock: "#5b5394",
+  bubble: "#9fe8ff", surface: "#2fd0ff",
+};
+const REEF_COLORS = ["#ff3d9a", "#ff7a1a", "#a64dff", "#ffd23f", "#22e3ff", "#ff3355", "#9dff3a"];
+const CORAL = [                               // bottom-aligned ASCII templates
+  { flex: true,  rows: [" \\|/ ", "\\ Y /", " \\|/ ", "  |  "] },             // branch coral
+  { flex: true,  rows: ["}{}{}", "{}{}{", " }|{ ", "  |  "] },                // sea fan
+  { flex: true,  rows: ["\\\\|//", " \\|/ ", " (_) "], glow: true },          // anemone
+  { flex: false, rows: [" @@@ ", "@@@@@"] },                                 // brain coral
+  { flex: false, rows: ["o    ", "| o  ", "| | o", "|_|_|"] },               // tube sponges
+];
+const ROCK = [" __  ", "/  \\_", "/____\\"];
 
 // ================================================================ state
-const STORE_KEY = "ghost-aquarium-tuner-v2";
+const STORE_KEY = "ghost-aquarium-tuner-v3";
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const defaultsT = () => Object.fromEntries(FIELDS.map((f) => [f.k, clone(f.def)]));
 let T = defaultsT(), palettes = clone(DEFAULT_PALETTES), scene = clone(DEFAULT_SCENE), seed = 42;
@@ -198,6 +225,8 @@ const len = (a) => Math.hypot(a.x, a.y);
 const norm = (a) => { const l = len(a); return l < 1e-6 ? v() : v(a.x / l, a.y / l); };
 const limit = (a, m) => { const l = len(a); return l > m && l > 0 ? v(a.x / l * m, a.y / l * m) : a; };
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const wrapAngle = (a) => ((((a + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
 
 class Rng {                                    // xorshift32, same as tank::Rng
   constructor(s) { this.s = (s >>> 0) || 0x9E3779B9; }
@@ -206,88 +235,164 @@ class Rng {                                    // xorshift32, same as tank::Rng
   int(n) { return Math.floor(this.uniform(0, n)); }
 }
 
+const hexToRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 function hexToHsl(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const [R, G, B] = hexToRgb(hex), r = R / 255, g = G / 255, b = B / 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
   if (mx === mn) return [0, 0, l];
   const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
-  let h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return [h * 60, s, l];
 }
-const lerpHue = (a, b, t) => { let d = ((b - a + 540) % 360) - 180; return (a + d * t + 360) % 360; };
+const lerpHue = (a, b, t) => { const d = ((b - a + 540) % 360) - 180; return (a + d * t + 360) % 360; };
 const hsl = (h, s, l, a = 1) => `hsla(${h.toFixed(1)},${(clamp(s, 0, 1) * 100).toFixed(1)}%,${(clamp(l, 0, 1) * 100).toFixed(1)}%,${a.toFixed(3)})`;
 
 // Depth grading: far fish are darker, less saturated and pulled toward deep blue.
 const DEPTH = [
-  { l: 0.50, s: 0.75, blue: 0.35 },
-  { l: 0.78, s: 0.92, blue: 0.10 },
+  { l: 0.55, s: 0.80, blue: 0.30 },
+  { l: 0.80, s: 0.92, blue: 0.10 },
   { l: 1.00, s: 1.00, blue: 0.00 },
 ];
 
 // ================================================================ simulation
+function shuffled(rng, n) { const a = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = rng.int(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
 function makeTank(s) {
   const rng = new Rng(s);
   const fish = [];
   let id = 0;
   for (let L = 0; L < 3; L++) {
-    for (let i = 0; i < T.fishPerLayer[L]; i++) {
-      const a = rng.uniform(-0.6, 0.6) + (rng.uniform(0, 1) < 0.5 ? 0 : Math.PI), sp = T.maxSpeed[L] * 0.6;
+    const cnt = T.fishPerLayer[L], slots = shuffled(rng, cnt);
+    for (let i = 0; i < cnt; i++) {
+      // stratified preferred depths: each fish in a layer gets its own band, so they spread out
+      const homeBase = HOME_MIN + (slots[i] + 0.5) / Math.max(1, cnt) * (HOME_MAX - HOME_MIN) + rng.uniform(-8, 8);
+      const a = rng.uniform(-0.4, 0.4) + (rng.uniform(0, 1) < 0.5 ? 0 : Math.PI), sp = T.maxSpeed[L] * 0.6;
       fish.push({
         id: id++, layer: L, pal: rng.int(palettes.length),
-        pos: v(rng.uniform(T.edgeMargin, W - T.edgeMargin), rng.uniform(SURFACE_Y + T.edgeMargin, H - T.edgeMargin)),
+        pos: v(rng.uniform(T.edgeMargin, W - T.edgeMargin), clamp(homeBase, HOME_MIN, HOME_MAX)),
         vel: v(Math.cos(a) * sp, Math.sin(a) * sp),
         wanderAngle: a, facingRight: Math.cos(a) > 0, wavePhase: rng.uniform(0, TAU),
-        boostT: 0, leapT: 0, airborne: false, hist: [],
-        homeY: rng.uniform(HOME_MIN, HOME_MAX),   // preferred depth; drifts slowly so fish use the whole tank
+        boostT: 0, leapT: 0, airborne: false, hist: [], body: [],
+        homeBase, homeY: homeBase, turnP: 0, pendingRight: false, turnSwapped: false,
       });
     }
   }
   const seaweed = [];
   for (let i = 0; i < SEAWEED_COUNT; i++) {
-    seaweed.push({ x: W * (0.07 + 0.86 * i / (SEAWEED_COUNT - 1)) + rng.uniform(-10, 10), height: rng.uniform(45, 110), phase: rng.uniform(0, TAU) });
+    seaweed.push({ x: W * (0.12 + 0.76 * i / (SEAWEED_COUNT - 1)) + rng.uniform(-10, 10), height: rng.uniform(50, 105), phase: rng.uniform(0, TAU), tint: rng.uniform(0, 1) });
   }
   const plankton = [];
   for (let i = 0; i < PLANKTON; i++) {
-    plankton.push({ pos: v(rng.uniform(0, W), rng.uniform(SURFACE_Y, H)), vel: v(rng.uniform(-3, 3), rng.uniform(-2, 2)), phase: rng.uniform(0, TAU) });
+    plankton.push({ pos: v(rng.uniform(0, W), rng.uniform(SURFACE_Y, H)), vel: v(rng.uniform(-3, 3), rng.uniform(-2, 2)), phase: rng.uniform(0, TAU), color: rng.uniform(0, 1) < 0.5 ? "#4fe9ff" : REEF_COLORS[rng.int(REEF_COLORS.length)] });
   }
-  return { rng, fish, seaweed, plankton, bubbles: [], particles: [], ripples: [], time: 0, bubbleAcc: 0 };
+  // reef: corals between the seaweed, rocks, sand
+  const reef = [];
+  for (let i = 0; i < 7; i++) {
+    const tpl = CORAL[rng.int(CORAL.length)];
+    reef.push({ x: W * (0.05 + 0.9 * i / 6) + rng.uniform(-9, 9), rows: tpl.rows, flex: tpl.flex, glow: !!tpl.glow, color: REEF_COLORS[rng.int(REEF_COLORS.length)], phase: rng.uniform(0, TAU) });
+  }
+  const rocks = [];
+  for (let i = 0; i < 3; i++) rocks.push({ x: rng.uniform(30, W - 30), star: rng.uniform(0, 1) < 0.7, starColor: REEF_COLORS[rng.int(REEF_COLORS.length)] });
+  const sand = [];
+  for (let x = 2; x < W; x += 4) sand.push({ x: x + rng.uniform(-1, 1), y: H - 2 - rng.uniform(0, 3), ch: [",", ".", "`", "."][rng.int(4)], pebble: rng.uniform(0, 1) < 0.08 ? REEF_COLORS[rng.int(REEF_COLORS.length)] : null });
+  const rays = [];
+  for (let i = 0; i < 4; i++) rays.push({ x: W * (0.15 + 0.7 * i / 3) + rng.uniform(-20, 20), w: rng.uniform(14, 30), slant: rng.uniform(25, 55), phase: rng.uniform(0, TAU) });
+  return { rng, fish, seaweed, plankton, reef, rocks, sand, rays, bubbles: [], particles: [], ripples: [], time: 0, bubbleAcc: 0 };
 }
 
 function steerEdges(f) {
   const m = T.edgeMargin, k = T.edgeWeight * T.maxForce;
   const fac = (d) => (d < 0 ? 1 : clamp((m - d) / m, 0, 1));
   const top = f.leapT > 0 ? 0 : fac(f.pos.y - SURFACE_Y);   // a leaping fish ignores the surface
-  return v(fac(f.pos.x) * k - fac(W - f.pos.x) * k, top * k - fac(H - f.pos.y) * k);
+  return v(fac(f.pos.x) * k - fac(W - f.pos.x) * k, top * k - fac(H - 30 - f.pos.y) * k);
 }
 
+// Reynolds wander: a point on a small circle projected AHEAD of the fish drifts randomly;
+// the fish steers toward it. The target stays within ±~30° of the heading, so wander makes
+// the fish meander but never asks it to turn around (a world-space wander direction did,
+// which caused constant reversals).
+const WANDER_AHEAD = 2, WANDER_RADIUS = 1;
 function steerWander(f, rng, dt) {
   f.wanderAngle += rng.uniform(-1, 1) * T.wanderJitter * dt;
-  const m = T.wanderWeight * T.maxForce;
-  return v(Math.cos(f.wanderAngle) * m, Math.sin(f.wanderAngle) * m);
+  const h = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
+  const ca = Math.cos(f.wanderAngle), sa = Math.sin(f.wanderAngle);
+  const target = v(h.x * WANDER_AHEAD + (h.x * ca - h.y * sa) * WANDER_RADIUS, h.y * WANDER_AHEAD + (h.y * ca + h.x * sa) * WANDER_RADIUS);
+  const u = norm(target), m = T.wanderWeight * T.maxForce;
+  return v(u.x * m, u.y * m);
+}
+
+// Nearest point of another fish's body to point p (falls back to its head).
+function nearestOnBody(o, p) {
+  let best = o.pos, bd = Infinity;
+  for (const q of (o.body.length ? o.body : [o.pos])) { const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; best = q; } }
+  return best;
 }
 
 // One possible schooling rule, just for tuning. The C++ version is written separately (plan Task 4).
+// Separation is measured to the nearest point of each neighbour's BODY, scaled by body size,
+// so long fish keep real clearance instead of swimming through each other.
 function steerSchool(f, all) {
   const sep = v(), avgVel = v(), center = v();
   let n = 0;
+  const sepR = T.separationRadius * BODY_SPACE[f.layer];
   for (const o of all) {
-    if (o === f || o.layer !== f.layer || o.airborne) continue;
-    const dx = f.pos.x - o.pos.x, dy = f.pos.y - o.pos.y, d = Math.hypot(dx, dy);
-    if (d > T.neighborRadius) continue;
+    if (o === f || o.airborne) continue;
+    const q = nearestOnBody(o, f.pos);
+    const dx = f.pos.x - q.x, dy = f.pos.y - q.y, d = Math.hypot(dx, dy);
+    if (o.layer !== f.layer) {                 // light cross-layer spacing reduces visual clutter
+      const r = sepR * 0.7;
+      if (d < r && d > 1e-4) { const w = T.layerSpacing * (r - d) / r / d; sep.x += dx * w; sep.y += dy * w; }
+      continue;
+    }
+    const hd = Math.hypot(f.pos.x - o.pos.x, f.pos.y - o.pos.y);
+    if (hd > T.neighborRadius) continue;
     n++;
     avgVel.x += o.vel.x; avgVel.y += o.vel.y; center.x += o.pos.x; center.y += o.pos.y;
-    if (d < T.separationRadius && d > 1e-4) {
-      const w = (T.separationRadius - d) / T.separationRadius / d;
-      sep.x += dx * w; sep.y += dy * w;
-    }
+    if (d < sepR && d > 1e-4) { const w = (sepR - d) / sepR / d; sep.x += dx * w; sep.y += dy * w; }
   }
-  if (n === 0) return v();
   const ms = T.maxSpeed[f.layer];
   const seek = (dir) => { const u = norm(dir); return len(u) === 0 ? v() : v(u.x * ms - f.vel.x, u.y * ms - f.vel.y); };
-  const s = seek(sep), a = seek(v(avgVel.x / n, avgVel.y / n)), c = seek(v(center.x / n - f.pos.x, center.y / n - f.pos.y));
+  const s = seek(sep);
+  if (n === 0) return v(T.separationWeight * s.x, T.separationWeight * s.y);
+  const a = seek(v(avgVel.x / n, avgVel.y / n)), c = seek(v(center.x / n - f.pos.x, center.y / n - f.pos.y));
   return v(T.separationWeight * s.x + T.alignmentWeight * a.x + T.cohesionWeight * c.x,
            T.separationWeight * s.y + T.alignmentWeight * a.y + T.cohesionWeight * c.y);
+}
+
+// ---------------------------------------------------------------- body
+// Points spaced `spacing` px apart along the path the head has travelled (head first).
+function pathPoints(f, n, spacing) {
+  const pts = [v(f.pos.x, f.pos.y)];
+  let prev = pts[0], need = spacing;
+  for (let i = f.hist.length - 1; i >= 0 && pts.length < n; i--) {
+    const p = f.hist[i];
+    let seg = Math.hypot(prev.x - p.x, prev.y - p.y);
+    while (seg >= need && pts.length < n) {
+      const t = need / seg, q = v(prev.x + (p.x - prev.x) * t, prev.y + (p.y - prev.y) * t);
+      pts.push(q); prev = q; seg -= need; need = spacing;
+    }
+    need -= seg; prev = p;
+  }
+  const back = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
+  while (pts.length < n) { const l = pts[pts.length - 1]; pts.push(v(l.x - back.x * spacing, l.y - back.y * spacing)); }
+  return pts;
+}
+
+// Follow the path, but each segment may bend at most `maxBend` from the one before it:
+// the body curves into a smooth arc and can never fold back on itself.
+function bodyChain(f, n, spacing, maxBend) {
+  const raw = pathPoints(f, n, spacing);
+  const out = [raw[0]];
+  let prev = len(f.vel) > 1e-3 ? norm(v(-f.vel.x, -f.vel.y)) : v(f.facingRight ? -1 : 1, 0);   // tail-ward
+  for (let j = 1; j < n; j++) {
+    const want = norm(v(raw[j].x - out[j - 1].x, raw[j].y - out[j - 1].y));
+    const a0 = Math.atan2(prev.y, prev.x);
+    const a1 = len(want) > 0 ? Math.atan2(want.y, want.x) : a0;
+    const a = a0 + clamp(wrapAngle(a1 - a0), -maxBend, maxBend);
+    prev = v(Math.cos(a), Math.sin(a));
+    out.push(v(out[j - 1].x + prev.x * spacing, out[j - 1].y + prev.y * spacing));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- particles + splashes
@@ -332,67 +437,165 @@ function burst(tk, x, y) {                      // tap underwater: sparkles + sc
   for (let i = 0; i < 6; i++) emit(tk, { kind: "bubble", pos: v(x + rng.uniform(-4, 4), y), vel: v(rng.uniform(-8, 8), -rng.uniform(10, 30)), life: 2, max: 2, color: scene.bubble, ch: "o" });
   for (const f of tk.fish) {
     const d = v(f.pos.x - x, f.pos.y - y), dist = len(d);
-    if (dist < 75 && !f.airborne) { const u = dist < 1e-3 ? v(1, 0) : norm(d); const sp = T.maxSpeed[f.layer] * 2.4; f.vel = v(u.x * sp, u.y * sp); f.boostT = 0.7; }
+    if (dist < 75 && !f.airborne) f.flee = dist < 1e-3 ? v(1, 0) : norm(d), f.boostT = 0.8;   // turn away fast, not instantly
   }
 }
 
+// Only fish near the surface and away from the side walls leap. Exit speed is fixed, so the
+// arc tops out ~30px above the water (v²/2g) and the fish lands back inside the tank.
+const LEAP_VY = 100, LEAP_X_MIN = 70, LEAP_X_MAX = W - 70;
 function startLeap(tk, f) {
   const ms = T.maxSpeed[f.layer];
-  const dir = f.vel.x >= 0 ? 1 : -1;
+  const dir = f.pos.x < W / 2 ? 1 : -1;        // leap toward the middle of the tank
   f.leapT = 2.2; f.boostT = 1.2;
-  f.vel = v(dir * ms * 1.3, -Math.max(95, Math.sqrt(2 * GRAVITY * Math.max(0, f.pos.y - SURFACE_Y + 25))));
+  f.vel = v(dir * ms * 1.1, -LEAP_VY);
 }
 
 function tryAutoLeap(tk) {
-  const cands = tk.fish.filter((f) => f.layer > 0 && !f.airborne && f.leapT <= 0 && f.pos.y < SURFACE_Y + 110);
+  const cands = tk.fish.filter((f) => f.layer > 0 && !f.airborne && f.leapT <= 0 && f.turnP === 0 &&
+    f.pos.y < SURFACE_Y + 70 && f.pos.x > LEAP_X_MIN && f.pos.x < LEAP_X_MAX);
   if (cands.length) startLeap(tk, cands[tk.rng.int(cands.length)]);
 }
 
 // ---------------------------------------------------------------- step
 function step(tk, dt) {
   const rng = tk.rng;
+  const maxBend = T.bodyMaxBend * Math.PI / 180;
   // 1) forces from one snapshot (order-independent)
-  const forces = tk.fish.map((f) => {
+  const edgeFrac = [], nav = [];
+  const forces = tk.fish.map((f, i) => {
+    edgeFrac[i] = 0; nav[i] = v();
     if (f.airborne) return v(0, GRAVITY);
     const a = steerSchool(f, tk.fish), b = steerEdges(f), c = steerWander(f, rng, dt);
-    // Real fish swim level and hold a preferred depth; without the depth pull they drift
-    // to the margins and glide along the walls.
-    f.homeY = clamp(f.homeY + rng.uniform(-1, 1) * 10 * dt, HOME_MIN, HOME_MAX);
+    nav[i] = v(b.x + c.x, b.y + c.y);   // "where it wants to go": walls + wander, not neighbours
+    // fish swim level and hold their own drifting depth slot
+    f.homeY = clamp(f.homeY + rng.uniform(-1, 1) * 8 * dt + (f.homeBase - f.homeY) * 0.05 * dt, HOME_MIN, HOME_MAX);
     const level = v(0, -f.vel.y * T.levelPull * 2 + (f.homeY - f.pos.y) * T.depthPull * 0.5);
-    return f.leapT > 0 ? v(c.x * 0.3, 0) : v(a.x + b.x + c.x + level.x, a.y + b.y + c.y + level.y);
+    let fx = a.x + b.x + c.x + level.x, fy = a.y + b.y + c.y + level.y;
+    if (f.flee && f.boostT > 0) {
+      // never flee into a wall: drop the part of the flee that points into a nearby edge
+      let ex = f.flee.x, ey = f.flee.y; const m = T.edgeMargin;
+      if ((f.pos.x < m && ex < 0) || (f.pos.x > W - m && ex > 0)) ex = 0;
+      if ((f.pos.y < SURFACE_Y + m && ey < 0) || (f.pos.y > H - 30 - m && ey > 0)) ey = 0;
+      fx += ex * T.maxForce * 6; fy += ey * T.maxForce * 6;
+    }
+    if (f.leapT > 0) return v(c.x * 0.3, 0);
+    // Wall avoidance has priority: near a wall the other forces are scaled down and the
+    // force budget grows, so a fast fish can actually turn before it leaves the screen.
+    const e = clamp(len(b) / (T.edgeWeight * T.maxForce + 1e-6), 0, 1);
+    edgeFrac[i] = e;
+    const others = limit(v(fx - b.x, fy - b.y), T.maxForce * (f.boostT > 0 ? 4 : 1) * (1 - 0.6 * e));
+    return v(others.x + b.x, others.y + b.y);
   });
-  // 2) integrate + events
+  // 2) integrate with a turn-rate limit + events
   tk.fish.forEach((f, i) => {
     const ms = T.maxSpeed[f.layer];
     if (f.airborne) {
       f.vel.x += forces[i].x * dt; f.vel.y += forces[i].y * dt;
     } else {
-      const s = limit(forces[i], T.maxForce * (f.boostT > 0 ? 3 : 1));
-      f.vel = v(f.vel.x + s.x * dt, f.vel.y + s.y * dt);
-      if (f.leapT <= 0) f.vel = limit(f.vel, ms * (1 + 1.4 * clamp(f.boostT / 0.7, 0, 1)));
+      const boosted = f.boostT > 0;
+      const s = limit(forces[i], T.maxForce * (boosted ? 4 : 1) * (1 + 2 * edgeFrac[i]));
+      const want = v(f.vel.x + s.x * dt, f.vel.y + s.y * dt);
+      if (f.leapT > 0) {
+        f.vel = v(want.x, Math.min(want.y, -LEAP_VY * 0.8));   // keep swimming up until it breaks the surface
+      } else {
+        // Heading can only rotate at maxTurnRate: fish swing through wide arcs instead of
+        // reversing on the spot, which is what made bodies fold and contort.
+        const cap = ms * (1 + 1.4 * clamp(f.boostT / 0.7, 0, 1));
+        const curA = Math.atan2(f.vel.y, f.vel.x);
+        const wantA = len(want) > 1e-6 ? Math.atan2(want.y, want.x) : curA;
+        const maxTurn = T.maxTurnRate * (boosted ? 2.2 : 1) * (1 + edgeFrac[i]) * dt;
+        const diff = wrapAngle(wantA - curA);
+        // A full reversal (more than flipAngle, horizontal direction changing) becomes a
+        // flip-turn instead of a tight U-arc: a long body can't wrap around a small circle
+        // without curling into an unreadable column of characters.
+        // Reversals come from NAVIGATION only (walls + wander). Neighbours pushing backward
+        // (separation from the fish ahead) should slow a fish down, not turn it around;
+        // measured: 70% of flips were schooling-triggered before this.
+        const g = nav[i], steerA = Math.atan2(g.y, g.x);
+        const reversing = len(g) > 0.5 * T.maxForce && Math.abs(wrapAngle(steerA - curA)) > T.flipAngle * Math.PI / 180 &&
+                          Math.sign(g.x) !== Math.sign(f.vel.x) && Math.abs(g.x) > 0.3 * len(g);
+        // Debounce + cooldown: the urge to reverse must persist, and a fish that just flipped
+        // won't flip again for a while. Without this, schooling neighbours flip each other back
+        // and forth (each fish's alignment target is a neighbour that just reversed).
+        f.flipCooldown = Math.max(0, (f.flipCooldown || 0) - dt);
+        f.reverseT = reversing ? (f.reverseT || 0) + dt : 0;
+        const canFlip = f.turnP === 0 && (f.flipCooldown === 0 || edgeFrac[i] > 0.3);   // walls override the cooldown
+        const startFlip = () => { f.turnP = 1e-6; f.flipTurn = true; f.turnSwapped = false; f.reverseT = 0; f.flipCooldown = 3.0; };
+        if (canFlip && f.reverseT > 0.25) startFlip();
+        if (f.flipTurn) {
+          // hold heading and slow down while the turn animation plays
+          const spd = Math.max(ms * T.minSpeedFrac * 0.5, len(f.vel) * (1 - 3 * dt));
+          f.vel = v(Math.cos(curA) * spd, Math.sin(curA) * spd);
+        } else {
+          let ang = curA + clamp(diff, -maxTurn, maxTurn);
+          const right = Math.cos(curA) >= 0;
+          // An arc that would cross vertical becomes a flip-turn: arcs are only for gentle
+          // course changes; reversing through an arc curls the body into a column.
+          if ((Math.cos(ang) >= 0) !== right) { if (canFlip) startFlip(); ang = curA; }
+          // Pitch limit: aquarium fish swim mostly level, never straight up or down.
+          const pitchMax = T.maxPitch * Math.PI / 180;
+          const pitch = clamp(right ? wrapAngle(ang) : wrapAngle(Math.PI - ang), -pitchMax, pitchMax);
+          ang = right ? pitch : Math.PI - pitch;
+          const spd = clamp(len(want), ms * T.minSpeedFrac, cap);
+          f.vel = v(Math.cos(ang) * spd, Math.sin(ang) * spd);
+        }
+      }
     }
     f.pos.x += f.vel.x * dt; f.pos.y += f.vel.y * dt;
     f.boostT = Math.max(0, f.boostT - dt); f.leapT = Math.max(0, f.leapT - dt);
-    if (Math.abs(f.vel.x) > T.facingThreshold) f.facingRight = f.vel.x > 0;
+    if (f.boostT === 0) f.flee = null;
     const speed = len(f.vel);
     f.wavePhase += TAU * T.bodyWaveHz * (0.4 + 0.9 * clamp(speed / ms, 0, 2.5)) * dt;
 
+    // body history (stored by distance) + the bend-limited body chain
+    const last = f.hist[f.hist.length - 1];
+    if (!last || Math.hypot(f.pos.x - last.x, f.pos.y - last.y) >= 1) { f.hist.push(v(f.pos.x, f.pos.y)); if (f.hist.length > HIST_CAP) f.hist.shift(); }
+    const n = SPECIES[f.layer].right.length;
+
+    // turn animation. Halfway through (body fully foreshortened) the fish swaps sides:
+    //  - flip-turn: reverse vx and mirror the path history around the head, so the body
+    //    lies straight on the new side instead of wrapped around a tight curve
+    //  - arc-turn: just swap the glyph (the body already lies the other way)
+    if (f.turnP > 0) {
+      f.turnP += dt / T.turnTime;
+      if (!f.turnSwapped && f.turnP >= 0.5) {
+        if (f.flipTurn) {
+          f.vel.x = -f.vel.x;
+          for (const h of f.hist) h.x = 2 * f.pos.x - h.x;
+          f.facingRight = f.vel.x > 0;
+          f.wanderAngle = -f.wanderAngle;   // mirror the heading-relative wander too
+        } else {
+          f.facingRight = f.pendingRight;
+        }
+        f.turnSwapped = true;
+      }
+      if (f.turnP >= 1) { f.turnP = 0; f.flipTurn = false; }
+    }
+    f.body = bodyChain(f, n, ADV[f.layer], maxBend);
+
+    // arc-turns: flip the glyph only when the BODY actually lies the other way, so it
+    // always reads head-to-tail correctly
+    if (f.turnP === 0 && !f.airborne) {
+      const dx = f.body[0].x - f.body[n - 1].x, hyst = 0.3 * (n - 1) * ADV[f.layer];
+      const flip = f.facingRight ? (dx < -hyst && f.vel.x < -T.facingThreshold) : (dx > hyst && f.vel.x > T.facingThreshold);
+      if (flip) { f.turnP = 1e-6; f.pendingRight = !f.facingRight; f.turnSwapped = false; }
+    }
+
     // surface crossings → splashes
-    const surf = SURFACE_Y;
-    if (!f.airborne && f.pos.y < surf && f.vel.y < 0) { f.airborne = true; splash(tk, f.pos.x, Math.abs(f.vel.y), fishColorHead(f)); }
-    else if (f.airborne && f.pos.y >= surf && f.vel.y > 0) {
+    if (!f.airborne && f.pos.y < SURFACE_Y && f.vel.y < 0) { f.airborne = true; splash(tk, f.pos.x, Math.abs(f.vel.y), fishColorHead(f)); }
+    else if (f.airborne && f.pos.y >= SURFACE_Y && f.vel.y > 0) {
       f.airborne = false; f.leapT = 0; f.vel.y *= 0.35; f.vel.x *= 0.8; f.boostT = 0.4;
       splash(tk, f.pos.x, f.vel.y * 2.6 + 40, fishColorHead(f));
     }
-    // random darts leave a bubble spray
-    if (!f.airborne && f.leapT <= 0 && rng.uniform(0, 1) < T.dartPerSec * dt) {
-      const u = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
+    // random darts (straight ahead, so no sudden turn) leave a bubble spray
+    const u = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
+    const ahead = v(f.pos.x + u.x * ms * 2.3, f.pos.y + u.y * ms * 2.3);   // ~1 s of sprint
+    const clearAhead = ahead.x > T.edgeMargin && ahead.x < W - T.edgeMargin && ahead.y > SURFACE_Y + T.edgeMargin && ahead.y < H - 30 - T.edgeMargin;
+    if (clearAhead && !f.airborne && f.leapT <= 0 && f.turnP === 0 && rng.uniform(0, 1) < T.dartPerSec * dt) {
       f.vel = v(u.x * ms * 2.3, u.y * ms * 2.3); f.boostT = 0.7;
       for (let k = 0; k < 7; k++) emit(tk, { kind: "bubble", pos: v(f.pos.x - u.x * 10, f.pos.y), vel: v(-u.x * rng.uniform(10, 30), rng.uniform(-12, 4)), life: rng.uniform(0.8, 1.6), max: 1.6, color: scene.bubble, ch: rng.uniform(0, 1) < 0.6 ? "." : "o" });
     }
-    // body history, stored by distance so body length doesn't depend on speed
-    const last = f.hist[f.hist.length - 1];
-    if (!last || Math.hypot(f.pos.x - last.x, f.pos.y - last.y) >= 1) { f.hist.push(v(f.pos.x, f.pos.y)); if (f.hist.length > HIST_CAP) f.hist.shift(); }
   });
   if (rng.uniform(0, 1) < T.leapPerSec * dt) tryAutoLeap(tk);
 
@@ -428,24 +631,6 @@ function step(tk, dt) {
 const seaweedSway = (hf, t, ph) =>
   T.seaweedSwayAmp * hf * hf * (0.7 * Math.sin(TAU * T.seaweedHz[0] * t + ph) + 0.3 * Math.sin(TAU * T.seaweedHz[1] * t + 1.7 * ph));
 
-// Points spaced `spacing` px apart along the path the head has travelled (head first).
-function bodyPoints(f, n, spacing) {
-  const pts = [v(f.pos.x, f.pos.y)];
-  let prev = pts[0], need = spacing;
-  for (let i = f.hist.length - 1; i >= 0 && pts.length < n; i--) {
-    const p = f.hist[i];
-    let seg = Math.hypot(prev.x - p.x, prev.y - p.y);
-    while (seg >= need && pts.length < n) {
-      const t = need / seg, q = v(prev.x + (p.x - prev.x) * t, prev.y + (p.y - prev.y) * t);
-      pts.push(q); prev = q; seg -= need; need = spacing;
-    }
-    need -= seg; prev = p;
-  }
-  const back = len(f.vel) > 1e-3 ? norm(f.vel) : v(f.facingRight ? 1 : -1, 0);
-  while (pts.length < n) { const l = pts[pts.length - 1]; pts.push(v(l.x - back.x * spacing, l.y - back.y * spacing)); }
-  return pts;
-}
-
 // ================================================================ rendering
 const canvas = document.getElementById("tank");
 const ctx = canvas.getContext("2d");
@@ -455,7 +640,6 @@ function setResolution(pixel) {
   canvas.width = W * SCALE; canvas.height = H * SCALE;
   canvas.classList.toggle("pixel", pixel);
   ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
-  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
 }
 const P = (x) => (pixelMode ? Math.round(x) : x);
 
@@ -463,6 +647,29 @@ let palHsl = [];
 function refreshPalettes() { palHsl = palettes.map(([a, b]) => [hexToHsl(a), hexToHsl(b)]); }
 const sceneHsl = {};
 function refreshScene() { for (const k in scene) sceneHsl[k] = hexToHsl(scene[k]); }
+
+// Water glow, pre-rendered once: teal under the surface → indigo → violet in the depths,
+// faded to PURE BLACK at all four edges so the screen's outline never shows on the reflector.
+let bgCanvas = null;
+function buildBackground() {
+  bgCanvas = document.createElement("canvas"); bgCanvas.width = W; bgCanvas.height = H;
+  const g = bgCanvas.getContext("2d"), img = g.createImageData(W, H), d = img.data;
+  const top = hexToRgb(scene.waterTop), mid = hexToRgb(scene.waterMid), deep = hexToRgb(scene.waterDeep);
+  const k = 0.32 * T.bgGlow;
+  for (let y = 0; y < H; y++) {
+    const u = clamp((y - SURFACE_Y) / (H - SURFACE_Y), 0, 1);
+    const c = u < 0.5 ? top.map((a, i) => a + (mid[i] - a) * (u / 0.5)) : mid.map((a, i) => a + (deep[i] - a) * ((u - 0.5) / 0.5));
+    for (let x = 0; x < W; x++) {
+      const edge = Math.min(x, W - 1 - x, y - SURFACE_Y, H - 1 - y);
+      const fade = y < SURFACE_Y ? 0 : smooth(0, 38, edge);
+      const center = 1 - 0.35 * Math.hypot((x - W / 2) / (W / 2), (y - H * 0.45) / (H / 2));
+      const m = k * fade * clamp(center, 0, 1) * (1.15 - 0.45 * u);
+      const o = (y * W + x) * 4;
+      d[o] = c[0] * m; d[o + 1] = c[1] * m; d[o + 2] = c[2] * m; d[o + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
 
 function fishCharColor(f, j, n, t) {
   const [a, b] = palHsl[f.pal % palHsl.length];
@@ -474,60 +681,121 @@ function fishCharColor(f, j, n, t) {
   return hsl(h, s, l);
 }
 
+function drawRays(tk) {
+  if (T.rays <= 0) return;
+  const t = tk.time, [r, g, b] = hexToRgb(scene.ray);
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for (const ray of tk.rays) {
+    const sway = 7 * Math.sin(t * 0.21 + ray.phase), a = 0.11 * T.rays * (0.6 + 0.4 * Math.sin(t * 0.5 + ray.phase * 2));
+    const x0 = ray.x + sway, x1 = x0 + ray.slant, yb = H * 0.88;
+    const grad = ctx.createLinearGradient(0, SURFACE_Y, 0, yb);
+    grad.addColorStop(0, `rgba(${r},${g},${b},${a})`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x0 - ray.w / 2, SURFACE_Y); ctx.lineTo(x0 + ray.w / 2, SURFACE_Y);
+    ctx.lineTo(x1 + ray.w * 0.9, yb); ctx.lineTo(x1 - ray.w * 0.9, yb); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawReef(tk) {
+  if (!T.reef) return;
+  const t = tk.time;
+  ctx.font = "bold 8px monospace";
+  // rocks
+  const [rh, rs, rl] = sceneHsl.rock;
+  for (const rk of tk.rocks) {
+    ROCK.forEach((row, r) => [...row].forEach((ch, c) => {
+      if (ch === " ") return;
+      ctx.fillStyle = hsl(rh, rs, rl * (0.7 + 0.3 * r / 2));
+      ctx.fillText(ch, P(rk.x + (c - row.length / 2) * 5), P(H - 5 - (ROCK.length - 1 - r) * 7));
+    }));
+    if (rk.star) { const [sh, ss, sl] = hexToHsl(rk.starColor); ctx.fillStyle = hsl(sh, ss * T.vibrance, sl); ctx.fillText("*", P(rk.x + 1), P(H - 5 - ROCK.length * 7 + 2)); }
+  }
+  // corals: dark at the base, bright at the tips; flexible ones sway
+  for (const c of tk.reef) {
+    const [h, s, l] = hexToHsl(c.color), rows = c.rows.length;
+    c.rows.forEach((row, r) => {
+      const up = (rows - 1 - r) / Math.max(1, rows - 1);            // 0 at base, 1 at top
+      [...row].forEach((ch, k) => {
+        if (ch === " ") return;
+        const sway = c.flex ? Math.sin(t * 1.1 + c.phase + k * 0.35) * 1.8 * up : 0;
+        const glow = c.glow ? 0.12 * Math.sin(t * 2.2 + c.phase + k) * up : 0;
+        ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.45 + 0.55 * up) + glow);
+        ctx.fillText(ch, P(c.x + (k - row.length / 2) * 5 + sway), P(H - 5 - (rows - 1 - r) * 7));
+      });
+    });
+  }
+  // sand + pebbles
+  ctx.font = "7px monospace";
+  const [ah, as, al] = sceneHsl.sand;
+  for (const g of tk.sand) {
+    if (g.pebble) { const [ph, ps, pl] = hexToHsl(g.pebble); ctx.fillStyle = hsl(ph, ps * T.vibrance, pl * 0.75); ctx.fillText("o", P(g.x), P(g.y)); }
+    else { ctx.fillStyle = hsl(ah, as, al * 0.6); ctx.fillText(g.ch, P(g.x), P(g.y)); }
+  }
+}
+
 function draw(tk) {
   const t = tk.time;
-  // Full clear to true black every frame. (A partial-alpha fade for trails never reaches 0:
-  // 8-bit rounding leaves faint gray residue, which shows up as haze in the reflection.)
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(bgCanvas, 0, 0, W, H);
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  drawRays(tk);
 
-  // plankton: faint twinkling specks for depth
-  if (T.plankton) {
-    ctx.font = "6px monospace";
-    const [ph, ps, pl] = sceneHsl.plankton;
-    for (const p of tk.plankton) ctx.fillStyle = hsl(ph, ps, pl * (0.55 + 0.45 * Math.sin(t * 1.7 + p.phase))), ctx.fillText(".", P(p.pos.x), P(p.pos.y));
+  // bioluminescent plankton
+  ctx.font = "7px monospace";
+  for (const p of tk.plankton) {
+    const [h, s, l] = hexToHsl(p.color), tw = 0.5 + 0.5 * Math.sin(t * 1.9 + p.phase);
+    ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.25 + 0.55 * tw * tw));
+    ctx.fillText(".", P(p.pos.x), P(p.pos.y));
   }
 
-  // seaweed: dark at the root, bright at the tip
-  ctx.font = "8px monospace";
+  // seaweed: each stalk tinted between green and teal; dark root, bright tip
+  ctx.font = "bold 8px monospace";
   const [bh, bs, bl] = sceneHsl.seaweedBase, [th, ts, tl] = sceneHsl.seaweedTip;
   for (const s of tk.seaweed) {
     const segs = Math.max(2, Math.floor(s.height / SEAWEED_SEG_PX));
     for (let i = 0; i < segs; i++) {
       const hf = i / (segs - 1);
-      ctx.fillStyle = hsl(lerpHue(bh, th, hf), (bs + (ts - bs) * hf) * T.vibrance, bl + (tl - bl) * hf * 0.85);
+      const hue = lerpHue(lerpHue(bh, th, hf), 170, s.tint * 0.5);
+      ctx.fillStyle = hsl(hue, (bs + (ts - bs) * hf) * T.vibrance, bl + (tl - bl) * hf * 0.85);
       ctx.fillText(i % 2 ? ")" : "(", P(s.x + seaweedSway(hf, t, s.phase)), P(H - 4 - i * SEAWEED_SEG_PX));
     }
   }
 
-  // fish, far → near; every character follows the head's path with a travelling body wave
+  drawReef(tk);
+
+  // fish, far → near
+  const maxBend = T.bodyMaxBend * Math.PI / 180;
   for (let L = 0; L < 3; L++) {
-    const fp = FONT_PX[L], adv = fp * 0.62;
-    ctx.font = `bold ${fp}px monospace`;
+    const fp = FONT_PX[L], adv = ADV[L];
     for (const f of tk.fish) {
       if (f.layer !== L) continue;
       const g = SPECIES[L];
       const headFirst = f.facingRight ? [...g.right].reverse() : [...g.left];
       const n = headFirst.length, wake = f.airborne ? 0 : T.wakeLength;
-      const pts = bodyPoints(f, n + wake, adv);
-      // wake: fading dots along the path behind the tail, in the tail's color
-      if (wake > 0) {
+      // turn animation: the body shortens around its middle (fish turning toward you), then lengthens
+      const squeeze = f.turnP > 0 ? Math.max(0.15, Math.abs(1 - 2 * f.turnP)) : 1;
+      const pts = bodyChain(f, n + wake, adv, maxBend);
+      const mid = pts[(n - 1) >> 1];
+      const body = pts.slice(0, n).map((p) => v(mid.x + (p.x - mid.x) * squeeze, mid.y + (p.y - mid.y) * squeeze));
+
+      if (wake > 0 && squeeze === 1) {
         ctx.font = `${Math.max(6, fp - 3)}px monospace`;
         const [, b] = palHsl[f.pal % palHsl.length], d = DEPTH[L];
         for (let k = 1; k <= wake; k++) {
           const p = pts[n - 1 + k], fade = 1 - k / (wake + 1);
           ctx.fillStyle = hsl(lerpHue(b[0], 215, d.blue), b[1] * d.s * T.vibrance, b[2] * d.l * 0.55 * fade);
-          ctx.fillText(k % 3 === 0 ? "-" : ".", P(p.x), P(p.y + Math.sin(f.wavePhase - (n + k) * 0.9) * T.bodyWaveAmp * 0.6));
+          ctx.fillText(k % 3 === 0 ? "-" : ".", P(p.x), P(p.y));
         }
-        ctx.font = `bold ${fp}px monospace`;
       }
+      ctx.font = `bold ${fp}px monospace`;
       for (let j = 0; j < n; j++) {
-        const a = pts[Math.max(0, j - 1)], b = pts[Math.min(n - 1, j + 1)];
+        const a = body[Math.max(0, j - 1)], b = body[Math.min(n - 1, j + 1)];
         const dir = norm(v(a.x - b.x, a.y - b.y)), perp = v(-dir.y, dir.x);
-        const off = T.bodyWaveAmp * Math.pow(j / (n - 1), 1.3) * Math.sin(f.wavePhase - j * 0.9);
+        const off = T.bodyWaveAmp * squeeze * Math.pow(j / (n - 1), 1.3) * Math.sin(f.wavePhase - j * 0.9);
         ctx.fillStyle = fishCharColor(f, j, n, t);
-        ctx.fillText(headFirst[j], P(pts[j].x + perp.x * off), P(pts[j].y + perp.y * off));
+        ctx.fillText(headFirst[j], P(body[j].x + perp.x * off), P(body[j].y + perp.y * off));
       }
     }
   }
@@ -550,13 +818,15 @@ function draw(tk) {
     ctx.fillText(p.ch, P(p.pos.x), P(p.pos.y));
   }
 
-  // water surface
+  // water surface with glints on the crests
   ctx.font = "bold 8px monospace";
   const [sh, ss, sl] = sceneHsl.surface;
   for (let x = 2; x < W; x += 5) {
     const y = surfaceAt(tk, x), lift = clamp((SURFACE_Y - y) / 3, -1, 1);
-    ctx.fillStyle = hsl(sh, ss * T.vibrance, sl * (0.55 + 0.35 * lift));
+    ctx.fillStyle = hsl(sh, ss * T.vibrance, sl * (0.6 + 0.35 * lift));
     ctx.fillText("~", P(x), P(y));
+    const glint = Math.sin(x * 78.233 + Math.floor(t * 3) * 12.9898) * 43758.5453;
+    if (glint - Math.floor(glint) > 0.94) { ctx.fillStyle = "#ffffff"; ctx.fillText("'", P(x), P(y - 4)); }
   }
 }
 
@@ -582,7 +852,7 @@ function buildControls() {
       const fs = document.createElement("fieldset"); if (f.fx) fs.className = "fx";
       fs.innerHTML = `<legend>${f.g}${f.fx ? " · new" : ""}</legend>`; host.appendChild(fs); groups[f.g] = fs;
     }
-    const changed = () => { if (f.respawn) tank = makeTank(seed); refreshExport(); save(); };
+    const changed = () => { if (f.respawn) tank = makeTank(seed); if (f.rebuildBg) buildBackground(); refreshExport(); save(); };
     if (Array.isArray(f.def)) f.sub.forEach((name, i) => groups[f.g].appendChild(slider(`${f.k}[${name}]`, T[f.k][i], f, (x) => { T[f.k][i] = x; changed(); })));
     else groups[f.g].appendChild(slider(f.k, T[f.k], f, (x) => { T[f.k] = x; changed(); }));
   }
@@ -605,14 +875,14 @@ function buildControls() {
     const row = document.createElement("div"); row.className = "row";
     row.innerHTML = `<label>${k}</label><input type="color"><output></output>`;
     const input = row.querySelector("input"); input.value = scene[k];
-    input.addEventListener("input", () => { scene[k] = input.value; refreshScene(); refreshExport(); save(); });
+    input.addEventListener("input", () => { scene[k] = input.value; refreshScene(); if (k.startsWith("water")) buildBackground(); refreshExport(); save(); });
     ch.appendChild(row);
   }
 }
 
 // ================================================================ export
 const toRgb565 = (hex) => {
-  const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const [r, g, b] = hexToRgb(hex);
   return "0x" + (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)).toString(16).toUpperCase().padStart(4, "0");
 };
 const cf = (x) => { const s = String(+x.toFixed(3)); return (s.includes(".") ? s : s + ".0") + "f"; };
@@ -630,7 +900,7 @@ function exportText() {
     ...fieldLines(FIELDS.filter((f) => !f.fx)),
     "};",
     "",
-    "// DRAFT look v2 fields (flow, color, splashes). Not in tank::Tuning yet: pending DESIGN update.",
+    "// DRAFT new fields (turning, flow, color, background, splashes). Pending DESIGN update.",
     "constexpr FxTuning kFx{",
     ...fieldLines(FIELDS.filter((f) => f.fx)),
     "};",
@@ -639,6 +909,7 @@ function exportText() {
     `constexpr uint16_t kFishPalette[${palettes.length}][2] = {  // {head, tail}`,
     ...palettes.map((p) => `    {${toRgb565(p[0])}, ${toRgb565(p[1])}},`),
     "};",
+    `constexpr uint16_t kReefPalette[${REEF_COLORS.length}] = {${REEF_COLORS.map(toRgb565).join(", ")}};`,
     ...Object.keys(scene).map((k) => `constexpr uint16_t k${k[0].toUpperCase() + k.slice(1)}Color = ${toRgb565(scene[k])};`),
     "",
     `// tuned with seed ${seed}`,
@@ -650,6 +921,7 @@ function refreshExport() { $("export").value = exportText(); }
 let tank;
 refreshPalettes(); refreshScene();
 setResolution(false);
+buildBackground();
 tank = makeTank(seed);
 buildControls(); refreshExport();
 
@@ -659,7 +931,7 @@ $("leap").addEventListener("click", () => tryAutoLeap(tank));
 $("reseed").addEventListener("click", () => { seed = (Math.random() * 0xFFFFFFFF) >>> 0; tank = makeTank(seed); refreshExport(); save(); });
 $("reset").addEventListener("click", () => {
   T = defaultsT(); palettes = clone(DEFAULT_PALETTES); scene = clone(DEFAULT_SCENE);
-  refreshPalettes(); refreshScene(); tank = makeTank(seed); buildControls(); refreshExport(); save();
+  refreshPalettes(); refreshScene(); buildBackground(); tank = makeTank(seed); buildControls(); refreshExport(); save();
 });
 $("copy").addEventListener("click", async () => {
   const text = exportText();
@@ -694,7 +966,8 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, leap: () => tryAutoLeap(tank), burst: (x, y) => burst(tank, x, y) };
+window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText, step, bodyChain,
+  leap: () => tryAutoLeap(tank), burst: (x, y) => burst(tank, x, y) };
 </script>
 </body>
 </html>
