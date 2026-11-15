@@ -1,0 +1,3 @@
+// UNTUNED: these are the DESIGN §6 defaults exported from prototype/index.html.
+// Overwrite this file with your own "Copy as C++" output once the tank feels right,
+// then paste the kTuning values into lib/tanksim/tuning.h and the colors into src/render/palette.h.

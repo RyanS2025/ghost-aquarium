@@ -12,3 +12,6 @@
 # Secrets (v2 WiFi / API config)
 secrets.h
 .env
+
+# Agent workspace (plan ledgers)
+.superpowers/

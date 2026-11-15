@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost Aquarium Tuner</title>
+<!--
+  Ghost Aquarium tuning prototype (ADR 0007).
+  A deliberately simple JS port of the motion model in docs/DESIGN.md §5, used to
+  pick values by feel. Once exported, lib/tanksim (C++) is the source of truth.
+  Single file, no build step, no external libraries: open it in a browser.
+-->
+<style>
+  :root {
+    --bg: #07090d; --panel: #0d1118; --line: #1b2330; --text: #c9d4e3;
+    --muted: #6b7a90; --accent: #ffb347;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header { padding: 18px 16px 0; text-align: center; }
+  header h1 { margin: 0; font-size: 15px; letter-spacing: .08em; color: var(--accent); }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main { display: flex; flex-wrap: wrap; gap: 24px; padding: 18px 16px 32px; justify-content: center; align-items: flex-start; }
+  .stage { display: flex; flex-direction: column; gap: 10px; align-items: center; min-width: 0; }
+  .glass {
+    padding: 14px; border: 1px solid var(--line); border-radius: 6px;
+    background: linear-gradient(180deg, #0b0f15, #05070a);
+  }
+  canvas {
+    display: block; width: 960px; max-width: calc(100vw - 64px); aspect-ratio: 4 / 3;
+    image-rendering: pixelated; background: #000;
+  }
+  canvas.mirror { transform: scaleX(-1); }
+  .hud { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); justify-content: center; }
+  .hud b { color: var(--text); font-weight: normal; }
+  aside {
+    width: 360px; max-width: 100%; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 14px; max-height: calc(100vh - 40px); overflow: auto;
+  }
+  fieldset { border: 1px solid var(--line); border-radius: 4px; margin: 0 0 12px; padding: 6px 10px 8px; }
+  legend { color: var(--accent); padding: 0 4px; }
+  .row { display: grid; grid-template-columns: 1fr 120px 48px; gap: 8px; align-items: center; margin: 3px 0; }
+  .row label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row output { text-align: right; color: var(--muted); }
+  .row input[type=color] { width: 120px; height: 22px; border: 1px solid var(--line); background: none; padding: 0; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  label.check { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+  button {
+    background: #161e29; color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  textarea {
+    width: 100%; height: 260px; background: #05070a; color: #9fd8ff; border: 1px solid var(--line);
+    border-radius: 4px; font: 11px/1.35 ui-monospace, Menlo, monospace; padding: 8px; resize: vertical;
+  }
+  #copied { color: var(--accent); min-height: 1.4em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GHOST AQUARIUM · TUNER</h1>
+  <p>320×240 · pure black is invisible in the reflection · tune by feel, then “Copy as C++”</p>
+</header>
+<main>
+  <section class="stage">
+    <div class="glass"><canvas id="tank" width="320" height="240"></canvas></div>
+    <div class="hud">
+      <span>fps <b id="fps">–</b></span>
+      <span>fish <b id="nfish">–</b></span>
+      <span>bubbles <b id="nbub">–</b></span>
+      <span>seed <b id="seed">–</b></span>
+      <span>sim t <b id="simt">–</b></span>
+    </div>
+  </section>
+  <aside>
+    <div id="controls"></div>
+    <fieldset>
+      <legend>Colors</legend>
+      <div id="colors"></div>
+    </fieldset>
+    <fieldset>
+      <legend>View</legend>
+      <label class="check"><input type="checkbox" id="mirror"> Mirror (how it looks on the real reflector)</label>
+      <div class="btns">
+        <button id="reseed">Reseed</button>
+        <button id="reset">Reset to DESIGN defaults</button>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Export</legend>
+      <div class="btns"><button id="copy">Copy as C++</button></div>
+      <div id="copied"></div>
+      <textarea id="export" readonly spellcheck="false"></textarea>
+    </fieldset>
+  </aside>
+</main>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- constants
+const W = 320, H = 240;
+const STEP = 1 / 60, MAX_STEPS = 5;            // DESIGN §5: fixed 60 Hz, ≤5 catch-up steps
+const LAYER_NAMES = ["Far", "Mid", "Near"];
+const SPECIES = [                               // DESIGN §4 (species index == layer in v1)
+  { right: "><>",      left: "<><" },
+  { right: "><('>",    left: "<')><" },
+  { right: "><((('>",  left: "<')))><" },
+];
+const FONT_PX = [8, 10, 13];                    // DESIGN §7: Far smallest, Near largest
+const BUBBLE_CAP = 64;
+const SEAWEED_COUNT = 5;
+const SEAWEED_SEG_PX = 7;
+
+// Field order MUST match struct tank::Tuning in lib/tanksim/tuning.h (DESIGN §6).
+const FIELDS = [
+  { k: "maxSpeed",         g: "Motion",        def: [18, 28, 40], min: 2, max: 90, step: 1, sub: LAYER_NAMES },
+  { k: "maxForce",         g: "Motion",        def: 30,  min: 2,  max: 150, step: 1 },
+  { k: "neighborRadius",   g: "Schooling",     def: 40,  min: 4,  max: 120, step: 1 },
+  { k: "separationRadius", g: "Schooling",     def: 14,  min: 2,  max: 60,  step: 1 },
+  { k: "cohesionWeight",   g: "Schooling",     def: 0.6, min: 0,  max: 4,   step: 0.05 },
+  { k: "alignmentWeight",  g: "Schooling",     def: 1.0, min: 0,  max: 4,   step: 0.05 },
+  { k: "separationWeight", g: "Schooling",     def: 1.6, min: 0,  max: 4,   step: 0.05 },
+  { k: "wanderWeight",     g: "Wander & edges", def: 0.8, min: 0, max: 3,   step: 0.05 },
+  { k: "wanderJitter",     g: "Wander & edges", def: 2.0, min: 0, max: 12,  step: 0.1 },
+  { k: "edgeMargin",       g: "Wander & edges", def: 24,  min: 4, max: 80,  step: 1 },
+  { k: "edgeWeight",       g: "Wander & edges", def: 2.5, min: 0, max: 8,   step: 0.1 },
+  { k: "facingThreshold",  g: "Wander & edges", def: 3,   min: 0, max: 15,  step: 0.5 },
+  { k: "fishPerLayer",     g: "Population",    def: [6, 5, 3], min: 0, max: 20, step: 1, sub: LAYER_NAMES, int: true, respawn: true },
+  { k: "bubblesPerSec",    g: "Bubbles",       def: 1.5, min: 0,  max: 10,  step: 0.1 },
+  { k: "bubbleRise",       g: "Bubbles",       def: 25,  min: 2,  max: 80,  step: 1 },
+  { k: "bubbleWobbleAmp",  g: "Bubbles",       def: 2,   min: 0,  max: 10,  step: 0.25 },
+  { k: "bubbleWobbleHz",   g: "Bubbles",       def: 1.2, min: 0,  max: 5,   step: 0.05 },
+  { k: "seaweedSwayAmp",   g: "Seaweed",       def: 6,   min: 0,  max: 20,  step: 0.5 },
+  { k: "seaweedHz",        g: "Seaweed",       def: [0.31, 0.83], min: 0, max: 2, step: 0.01, sub: ["slow", "fast"] },
+];
+const COLOR_DEFAULTS = {
+  layer: ["#3a6fb0", "#3fb8a8", "#ffb347"],   // Far dim + blue, Mid teal, Near bright warm
+  seaweed: "#2f7d4f",
+  bubble: "#7fb8d8",
+};
+
+// ---------------------------------------------------------------- state
+const STORE_KEY = "ghost-aquarium-tuner-v1";
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const defaultsT = () => Object.fromEntries(FIELDS.map((f) => [f.k, clone(f.def)]));
+let T = defaultsT();
+let colors = clone(COLOR_DEFAULTS);
+let seed = 42;
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+  if (saved) { T = Object.assign(defaultsT(), saved.T); colors = Object.assign(clone(COLOR_DEFAULTS), saved.colors); seed = saved.seed ?? seed; }
+} catch (_) { /* storage unavailable: run with defaults */ }
+const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify({ T, colors, seed })); } catch (_) {} };
+
+// ---------------------------------------------------------------- math
+const v = (x = 0, y = 0) => ({ x, y });
+const len = (a) => Math.hypot(a.x, a.y);
+const limit = (a, m) => { const l = len(a); return l > m && l > 0 ? v(a.x / l * m, a.y / l * m) : a; };
+
+// xorshift32, same semantics as tank::Rng (seed 0 replaced, uniform in [lo, hi)).
+class Rng {
+  constructor(s) { this.s = (s >>> 0) || 0x9E3779B9; }
+  next() { let x = this.s; x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; this.s = x; return x; }
+  uniform(lo, hi) { return lo + (hi - lo) * ((this.next() >>> 8) / 16777216); }
+}
+
+// ---------------------------------------------------------------- simulation
+function makeTank(s) {
+  const rng = new Rng(s);
+  const fish = [];
+  for (let L = 0; L < 3; L++) {
+    for (let i = 0; i < T.fishPerLayer[L]; i++) {
+      const a = rng.uniform(0, Math.PI * 2), sp = T.maxSpeed[L] * 0.5;
+      fish.push({
+        pos: v(rng.uniform(T.edgeMargin, W - T.edgeMargin), rng.uniform(T.edgeMargin, H - T.edgeMargin)),
+        vel: v(Math.cos(a) * sp, Math.sin(a) * sp),
+        layer: L, wanderAngle: rng.uniform(0, Math.PI * 2), facingRight: Math.cos(a) > 0,
+      });
+    }
+  }
+  const seaweed = [];
+  for (let i = 0; i < SEAWEED_COUNT; i++) {
+    seaweed.push({ x: W * (0.1 + 0.8 * i / (SEAWEED_COUNT - 1)) + rng.uniform(-12, 12), height: rng.uniform(40, 95), phase: rng.uniform(0, Math.PI * 2) });
+  }
+  return { rng, fish, bubbles: [], seaweed, time: 0, bubbleAcc: 0 };
+}
+
+function steerEdges(f) {
+  const m = T.edgeMargin, k = T.edgeWeight * T.maxForce;
+  const fac = (d) => (d < 0 ? 1 : Math.max(0, Math.min(1, (m - d) / m)));
+  return v(fac(f.pos.x) * k - fac(W - f.pos.x) * k, fac(f.pos.y) * k - fac(H - f.pos.y) * k);
+}
+
+function steerWander(f, rng, dt) {
+  f.wanderAngle += rng.uniform(-1, 1) * T.wanderJitter * dt;
+  const m = T.wanderWeight * T.maxForce;
+  return v(Math.cos(f.wanderAngle) * m, Math.sin(f.wanderAngle) * m);
+}
+
+// One possible schooling rule, just for tuning. The C++ version is written separately (plan Task 4).
+function steerSchool(f, all) {
+  const sep = v(), avgVel = v(), center = v();
+  let n = 0;
+  for (const o of all) {
+    if (o === f || o.layer !== f.layer) continue;
+    const dx = f.pos.x - o.pos.x, dy = f.pos.y - o.pos.y, d = Math.hypot(dx, dy);
+    if (d > T.neighborRadius) continue;
+    n++;
+    avgVel.x += o.vel.x; avgVel.y += o.vel.y; center.x += o.pos.x; center.y += o.pos.y;
+    if (d < T.separationRadius && d > 1e-4) {
+      const w = (T.separationRadius - d) / T.separationRadius / d;
+      sep.x += dx * w; sep.y += dy * w;
+    }
+  }
+  if (n === 0) return v();
+  const ms = T.maxSpeed[f.layer];
+  const seek = (dir) => { const l = len(dir); return l < 1e-6 ? v() : v(dir.x / l * ms - f.vel.x, dir.y / l * ms - f.vel.y); };
+  const s = seek(sep), a = seek(v(avgVel.x / n, avgVel.y / n)), c = seek(v(center.x / n - f.pos.x, center.y / n - f.pos.y));
+  return v(
+    T.separationWeight * s.x + T.alignmentWeight * a.x + T.cohesionWeight * c.x,
+    T.separationWeight * s.y + T.alignmentWeight * a.y + T.cohesionWeight * c.y,
+  );
+}
+
+function integrate(f, steer, dt, maxSpeed, maxForce) {
+  const s = limit(steer, maxForce);
+  f.vel = limit(v(f.vel.x + s.x * dt, f.vel.y + s.y * dt), maxSpeed);
+  f.pos.x += f.vel.x * dt; f.pos.y += f.vel.y * dt;
+}
+
+function step(tk, dt) {
+  // Compute every force from the same snapshot first, then integrate (order-independent).
+  const forces = tk.fish.map((f) => {
+    const a = steerSchool(f, tk.fish), b = steerEdges(f), c = steerWander(f, tk.rng, dt);
+    return v(a.x + b.x + c.x, a.y + b.y + c.y);
+  });
+  tk.fish.forEach((f, i) => {
+    integrate(f, forces[i], dt, T.maxSpeed[f.layer], T.maxForce);
+    if (Math.abs(f.vel.x) > T.facingThreshold) f.facingRight = f.vel.x > 0;   // hysteresis
+  });
+  tk.bubbleAcc += T.bubblesPerSec * dt;
+  while (tk.bubbleAcc >= 1) {
+    tk.bubbleAcc -= 1;
+    if (tk.bubbles.length < BUBBLE_CAP) {
+      tk.bubbles.push({ pos: v(tk.rng.uniform(8, W - 8), H + 2), phase: tk.rng.uniform(0, Math.PI * 2), rise: T.bubbleRise * tk.rng.uniform(0.8, 1.2) });
+    }
+  }
+  for (const b of tk.bubbles) b.pos.y -= b.rise * dt;
+  tk.bubbles = tk.bubbles.filter((b) => b.pos.y >= -4);
+  tk.time += dt;
+}
+
+const TAU = Math.PI * 2;
+const seaweedSway = (hf, t, ph) =>
+  T.seaweedSwayAmp * hf * hf * (0.7 * Math.sin(TAU * T.seaweedHz[0] * t + ph) + 0.3 * Math.sin(TAU * T.seaweedHz[1] * t + 1.7 * ph));
+
+// ---------------------------------------------------------------- rendering
+const canvas = document.getElementById("tank");
+const ctx = canvas.getContext("2d");
+
+function draw(tk) {
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+
+  ctx.font = "8px monospace"; ctx.fillStyle = colors.seaweed;
+  for (const s of tk.seaweed) {
+    const segs = Math.max(2, Math.floor(s.height / SEAWEED_SEG_PX));
+    for (let i = 0; i < segs; i++) {
+      const hf = i / (segs - 1);
+      ctx.fillText(i % 2 ? ")" : "(", Math.round(s.x + seaweedSway(hf, tk.time, s.phase)), H - 4 - i * SEAWEED_SEG_PX);
+    }
+  }
+  for (let L = 0; L < 3; L++) {
+    ctx.font = `${FONT_PX[L]}px monospace`; ctx.fillStyle = colors.layer[L];
+    for (const f of tk.fish) {
+      if (f.layer !== L) continue;
+      ctx.fillText(f.facingRight ? SPECIES[L].right : SPECIES[L].left, Math.round(f.pos.x), Math.round(f.pos.y));
+    }
+  }
+  ctx.font = "8px monospace"; ctx.fillStyle = colors.bubble;
+  for (const b of tk.bubbles) {
+    const x = b.pos.x + T.bubbleWobbleAmp * Math.sin(TAU * T.bubbleWobbleHz * tk.time + b.phase);
+    ctx.fillText("o", Math.round(x), Math.round(b.pos.y));
+  }
+}
+
+// ---------------------------------------------------------------- controls
+const $ = (id) => document.getElementById(id);
+const fmt = (x) => (Number.isInteger(x) ? String(x) : String(+x.toFixed(3)));
+
+function slider(label, value, f, onInput) {
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = `<label title="${label}">${label}</label><input type="range"><output></output>`;
+  const input = row.querySelector("input"), out = row.querySelector("output");
+  Object.assign(input, { min: f.min, max: f.max, step: f.step, value });
+  out.textContent = fmt(value);
+  input.addEventListener("input", () => { const x = f.int ? parseInt(input.value, 10) : parseFloat(input.value); out.textContent = fmt(x); onInput(x); });
+  return row;
+}
+
+function buildControls() {
+  const host = $("controls"); host.innerHTML = "";
+  const groups = {};
+  for (const f of FIELDS) {
+    if (!groups[f.g]) { const fs = document.createElement("fieldset"); fs.innerHTML = `<legend>${f.g}</legend>`; host.appendChild(fs); groups[f.g] = fs; }
+    const changed = () => { if (f.respawn) tank = makeTank(seed); refreshExport(); save(); };
+    if (Array.isArray(f.def)) {
+      f.sub.forEach((name, i) => groups[f.g].appendChild(slider(`${f.k}[${name}]`, T[f.k][i], f, (x) => { T[f.k][i] = x; changed(); })));
+    } else {
+      groups[f.g].appendChild(slider(f.k, T[f.k], f, (x) => { T[f.k] = x; changed(); }));
+    }
+  }
+  const ch = $("colors"); ch.innerHTML = "";
+  const picker = (label, get, set) => {
+    const row = document.createElement("div"); row.className = "row";
+    row.innerHTML = `<label>${label}</label><input type="color"><output></output>`;
+    const input = row.querySelector("input"); input.value = get();
+    input.addEventListener("input", () => { set(input.value); refreshExport(); save(); });
+    ch.appendChild(row);
+  };
+  LAYER_NAMES.forEach((n, i) => picker(`layer ${n}`, () => colors.layer[i], (c) => { colors.layer[i] = c; }));
+  picker("seaweed", () => colors.seaweed, (c) => { colors.seaweed = c; });
+  picker("bubble", () => colors.bubble, (c) => { colors.bubble = c; });
+}
+
+// ---------------------------------------------------------------- export
+const toRgb565 = (hex) => {
+  const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return "0x" + (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)).toString(16).toUpperCase().padStart(4, "0");
+};
+const cf = (x) => { const s = String(+x.toFixed(3)); return (s.includes(".") ? s : s + ".0") + "f"; };
+
+function exportText() {
+  const w = Math.max(...FIELDS.map((f) => f.k.length));
+  const lines = FIELDS.map((f) => {
+    const val = Array.isArray(f.def) ? `{${T[f.k].map((x) => (f.int ? String(x) : cf(x))).join(", ")}}` : cf(T[f.k]);
+    return `    /* ${f.k.padEnd(w)} */ ${val},`;
+  });
+  return [
+    "// lib/tanksim/tuning.h — values in tank::Tuning field order (DESIGN §6)",
+    "constexpr tank::Tuning kTuning{",
+    ...lines,
+    "};",
+    "",
+    "// src/render/palette.h — RGB565",
+    `constexpr uint16_t kLayerColor[3] = {${colors.layer.map(toRgb565).join(", ")}};  // Far, Mid, Near`,
+    `constexpr uint16_t kSeaweedColor  = ${toRgb565(colors.seaweed)};`,
+    `constexpr uint16_t kBubbleColor   = ${toRgb565(colors.bubble)};`,
+    "",
+    `// tuned with seed ${seed}`,
+  ].join("\n");
+}
+function refreshExport() { $("export").value = exportText(); }
+
+// ---------------------------------------------------------------- wiring
+let tank = makeTank(seed);
+buildControls();
+refreshExport();
+
+$("mirror").addEventListener("change", (e) => canvas.classList.toggle("mirror", e.target.checked));
+$("reseed").addEventListener("click", () => { seed = (Math.random() * 0xFFFFFFFF) >>> 0; tank = makeTank(seed); refreshExport(); save(); });
+$("reset").addEventListener("click", () => { T = defaultsT(); colors = clone(COLOR_DEFAULTS); tank = makeTank(seed); buildControls(); refreshExport(); save(); });
+$("copy").addEventListener("click", async () => {
+  const text = exportText();
+  try { await navigator.clipboard.writeText(text); $("copied").textContent = "Copied to clipboard."; }
+  catch (_) { $("export").select(); $("copied").textContent = "Clipboard blocked: text selected, press ⌘/Ctrl+C."; }
+});
+
+// ---------------------------------------------------------------- loop
+let last = performance.now(), acc = 0, fps = 60, hudAt = 0;
+function frame(now) {
+  const elapsed = (now - last) / 1000; last = now;
+  acc += elapsed;
+  let n = Math.floor(acc / STEP);
+  if (n > MAX_STEPS) { n = MAX_STEPS; acc = 0; } else { acc -= n * STEP; }   // drop excess after a stall
+  for (let i = 0; i < n; i++) step(tank, STEP);
+  draw(tank);
+  if (elapsed > 0) fps = fps * 0.95 + (1 / elapsed) * 0.05;
+  if (now - hudAt > 250) {
+    hudAt = now;
+    $("fps").textContent = fps.toFixed(0); $("nfish").textContent = tank.fish.length;
+    $("nbub").textContent = tank.bubbles.length; $("seed").textContent = seed; $("simt").textContent = tank.time.toFixed(1) + "s";
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// Read-only hook for automated checks.
+window.__tuner = { get tank() { return tank; }, get T() { return T; }, get fps() { return fps; }, exportText };
+</script>
+</body>
+</html>
