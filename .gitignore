@@ -1,0 +1,14 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.swp
+
+# Secrets (v2 WiFi / API config)
+secrets.h
+.env
