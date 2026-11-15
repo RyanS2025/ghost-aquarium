@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Least privilege: the workflow only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -33,8 +37,6 @@ jobs:
   # Runs only when the repo has a WOKWI_CLI_TOKEN secret (free: https://wokwi.com/dashboard/ci).
   simulate:
     runs-on: ubuntu-latest
-    env:
-      WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -56,9 +58,16 @@ jobs:
         env:
           PLATFORMIO_BUILD_FLAGS: -DGHOST_MIRROR=0
 
+      # Only reports whether the secret exists; the token itself goes to the Wokwi step alone.
+      - name: Check for a Wokwi token
+        id: wokwi
+        env:
+          TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: echo "enabled=$([ -n "$TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Run in Wokwi (expects an fps= stats line)
-        if: env.WOKWI_CLI_TOKEN != ''
-        uses: wokwi/wokwi-ci-action@v1
+        if: steps.wokwi.outputs.enabled == 'true'
+        uses: wokwi/wokwi-ci-action@09e807a07e05b6f2498e43e3fb7ffcf38c277af7 # v1 (pinned commit)
         with:
           token: ${{ secrets.WOKWI_CLI_TOKEN }}
           timeout: 20000
@@ -66,7 +75,7 @@ jobs:
           serial_log_file: wokwi-serial.log
 
       - name: Upload serial log
-        if: always() && env.WOKWI_CLI_TOKEN != ''
+        if: always() && steps.wokwi.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wokwi-serial-log
