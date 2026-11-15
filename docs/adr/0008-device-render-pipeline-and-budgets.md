@@ -34,10 +34,11 @@ The look was designed in a browser that can do things the device can't: anti-ali
 
 4. **Measured per-frame drawing workload (device preview):** about **290 glyph blits (≈18k pixel writes)** when calm and **≤365 glyphs** when busy, plus the 150 KB background copy and ray adds. That's small for a 240 MHz core. The rough estimate is a few milliseconds of CPU work, compared with the 31 ms SPI push.
 5. **Font scales per depth layer: 1×, 1.5×, 2×** (6/9/12 px advance). The fractional 1.5× repeats some pixel rows unevenly, which is exactly what `setTextSize(1.5)` does and is what the preview shows.
-6. **Precompute colors in firmware.** The prototype computes HSL→RGB565 per character per frame for convenience. The firmware builds RGB565 lookup tables at boot (per palette × layer × character position × 16 shimmer phases, a few KB) and does no color math per frame.
+6. **Color math.** v1 computes HSL→RGB565 per glyph, like the prototype: simple, and cheap at ~300 glyphs. If Phase 1 profiling shows render time matters, switch to RGB565 lookup tables built at boot (per palette × layer × character position × 16 shimmer phases, a few KB). The framebuffer holds **native** RGB565, so the firmware calls `lcd.setSwapBytes(true)` before `pushImage`. LovyanGFX reads a plain `uint16_t*` as byte-swapped otherwise, which garbles every color (caught in the final review).
+
 7. **Frame pipeline: start simple, with a planned upgrade.**
    - **v1:** one full-frame 150 KB sprite in **internal SRAM** (DMA-capable, faster than PSRAM), with the background copy in PSRAM. Rendering and the DMA push run one after the other, so expect `1000 / (render + 31) ms` → **~26–28 fps** if rendering takes ~5–8 ms.
-   - **If Phase 1 measures under 30 fps:** switch to **banded double-buffering**. Two 40-row band buffers (2 × 25 KB) let the CPU render band *k+1* while DMA pushes band *k*, so the frame rate is limited only by SPI (~32 fps). The renderer already takes a clip region per draw call, so banding means calling it once per band.
+   - **If Phase 1 measures under 30 fps:** switch to **banded double-buffering**. Two 40-row band buffers (2 × 25 KB) let the CPU render band *k+1* while DMA pushes band *k*, so the frame rate is limited only by SPI (~32 fps). `renderFrame` currently draws only full 320×240 frames, and refuses any other size rather than overrun it. Banding needs a band origin and clipping added to the renderer first. With banding, the renderer would write byte-swapped pixels so the push can use DMA without CPU conversion.
    - **Optional:** try 60–80 MHz SPI on the real module. Many ILI9341 boards handle it, but it isn't guaranteed. Keep 40 MHz as the default.
 8. **Legibility rules on the pixel grid:** fish tilt is capped at 8° by default (15° made the big fish into visible staircases), and the tail wiggle is under 1 px.
 
@@ -53,6 +54,6 @@ The look was designed in a browser that can do things the device can't: anti-ali
 ## Consequences
 
 - Visual decisions are made against the real pixel grid, colors and frame rate.
-- The renderer has a JS reference implementation to port and check the C++ against (same seed → same frame).
+- The renderer has a JS reference implementation to port and check the C++ against. The C++ RNG draw order differs from the JS (some JS draws only feed the drawn-fish experiment), so the same seed builds a different world. The comparison is visual: a C++ snapshot (`GHOST_SNAPSHOT`) against the device preview.
 - The pool caps are enforced in `tanksim`. Exceeding one drops the new item (it's never an error).
 - Phase 1 must record real numbers: render ms, push ms, fps, and free SRAM/PSRAM. These go into DESIGN §8 and confirm or replace the estimates above.

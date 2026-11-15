@@ -49,7 +49,7 @@ Vec2 steerEdges(const Fish& f, const Tuning& t) {
 }
 
 Vec2 steerWander(Fish& f, Rng& rng, float dt, const Tuning& t) {
-  f.wanderAngle += rng.uniform(-1.f, 1.f) * t.wanderJitter * dt;
+  f.wanderAngle = wrapAngle(f.wanderAngle + rng.uniform(-1.f, 1.f) * t.wanderJitter * dt);
   const Vec2 h = heading(f);
   const float ca = std::cos(f.wanderAngle), sa = std::sin(f.wanderAngle);
   const Vec2 target{h.x * kWanderAhead + (h.x * ca - h.y * sa) * kWanderRadius,
@@ -117,7 +117,8 @@ void swim(Fish& f, Vec2 force, Vec2 nav, float e, float dt, const Tuning& t, con
   f.boostT = std::max(0.f, f.boostT - dt);
   f.leapT = std::max(0.f, f.leapT - dt);
   const float speed = f.vel.length();
-  f.wavePhase += kTau * fx.bodyWaveHz * (0.4f + 0.9f * clampf(speed / ms, 0.f, 2.5f)) * dt;
+  // wrapped: an ever-growing float phase stops changing after ~5 days of 24/7 running
+  f.wavePhase = std::fmod(f.wavePhase + kTau * fx.bodyWaveHz * (0.4f + 0.9f * clampf(speed / ms, 0.f, 2.5f)) * dt, kTau);
 }
 
 void advanceTurn(Fish& f, float dt, const Tuning& t, const FxTuning& fx) {

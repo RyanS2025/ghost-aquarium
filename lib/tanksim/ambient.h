@@ -27,7 +27,7 @@ struct Particle {
 };
 
 struct Ripple {
-  float x, t0, amp;
+  float x, age, amp;  // age in s (advanced each step), so no absolute clock is needed
 };
 
 struct Plankton {
@@ -43,10 +43,10 @@ using RipplePool = Pool<Ripple, kMaxRipples>;
 // Seaweed sway at height fraction hf (0 root .. 1 tip): two sines, growing toward the tip.
 float seaweedSway(float hf, float t, float phase, const Tuning& tu);
 
-// Water-surface height at x: gentle waves plus decaying ripples.
+// Water-surface height at x: gentle waves (phase from t, a bounded animation time) plus ripples.
 float surfaceAt(const RipplePool& ripples, float x, float t);
 
-// Adds a ripple; when full, the oldest is dropped.
-void addRipple(RipplePool& ripples, float x, float t, float amp);
+// Adds a new ripple (age 0); when full, the oldest is dropped.
+void addRipple(RipplePool& ripples, float x, float amp);
 
 }  // namespace tank

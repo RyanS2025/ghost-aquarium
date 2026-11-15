@@ -52,6 +52,8 @@ Tank::Tank(const Tuning& t, const FxTuning& fx, uint32_t seed) : t_(t), fx_(fx),
   }
 }
 
+float Tank::animTime() const { return static_cast<float>(std::fmod(time_, 65536.0)); }
+
 int Tank::awayCount() const {
   int n = 0;
   for (int i = 0; i < fishN_; ++i) n += fish_[i].away ? 1 : 0;
@@ -100,7 +102,7 @@ void Tank::splash(float x, float strength, uint32_t rgb) {
     p.ch = rng_.uniform(0.f, 1.f) < 0.5f ? 'o' : '.';
     emit(p);
   }
-  addRipple(ripples_, x, time_, 3.2f * s);
+  addRipple(ripples_, x, 3.2f * s);
 }
 
 bool Tank::tryLeap() {
@@ -254,7 +256,7 @@ void Tank::step(float dt) {
   for (Bubble& b : bubbles_) b.pos.y -= b.rise * dt;
   for (int i = bubbles_.count - 1; i >= 0; --i) {
     if (bubbles_.items[i].pos.y < kSurfaceY + 1.f) {
-      addRipple(ripples_, bubbles_.items[i].pos.x, time_, 0.5f);
+      addRipple(ripples_, bubbles_.items[i].pos.x, 0.5f);
       bubbles_.removeAt(i);
     }
   }
@@ -273,15 +275,15 @@ void Tank::step(float dt) {
     p.life -= dt;
     if (p.kind == ParticleKind::Drop && p.vel.y > 0.f && p.pos.y > kSurfaceY + 1.f) {
       p.life = 0.f;
-      addRipple(ripples_, p.pos.x, time_, 0.35f);
+      addRipple(ripples_, p.pos.x, 0.35f);
     }
     if (p.kind == ParticleKind::Bubble && p.pos.y < kSurfaceY + 1.f) p.life = 0.f;
   }
   particles_.removeIf([](const Particle& p) {
     return p.life <= 0.f || p.pos.x < -10.f || p.pos.x > kScreen.w + 10.f || p.pos.y > kScreen.h + 10.f;
   });
-  const float now = time_;
-  ripples_.removeIf([now](const Ripple& r) { return now - r.t0 >= 3.5f; });
+  for (Ripple& r : ripples_) r.age += dt;
+  ripples_.removeIf([](const Ripple& r) { return r.age >= 3.5f; });
 
   // 5) plankton drift (wraps around)
   const float waterH = kScreen.h - kSurfaceY;

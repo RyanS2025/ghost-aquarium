@@ -16,15 +16,15 @@ float seaweedSway(float hf, float t, float phase, const Tuning& tu) {
 float surfaceAt(const RipplePool& ripples, float x, float t) {
   float y = kSurfaceY + 1.2f * std::sin(x * 0.07f + t * 1.3f) + 0.6f * std::sin(x * 0.19f - t * 0.9f);
   for (const Ripple& r : ripples) {
-    const float age = t - r.t0, d = std::fabs(x - r.x);
+    const float age = r.age, d = std::fabs(x - r.x);
     if (d < 70.f * age) y += r.amp * std::exp(-age * 1.1f) * std::exp(-d * 0.018f) * std::sin(0.28f * d - 8.f * age);
   }
   return y;
 }
 
-void addRipple(RipplePool& ripples, float x, float t, float amp) {
+void addRipple(RipplePool& ripples, float x, float amp) {
   if (ripples.count >= RipplePool::kCapacity) ripples.removeAt(0);
-  ripples.add({x, t, amp});
+  ripples.add({x, 0.f, amp});
 }
 
 }  // namespace tank

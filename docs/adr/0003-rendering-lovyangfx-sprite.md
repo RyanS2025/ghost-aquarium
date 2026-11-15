@@ -16,7 +16,7 @@ The Pepper's Ghost reflection also mirrors the image left to right, so it has to
 - Use **LovyanGFX** as the graphics library.
 - Draw every frame into a **full-screen `LGFX_Sprite`** (an off-screen framebuffer). Allocate it in **PSRAM**. If PSRAM isn't available (for example in a simulator that doesn't model it), fall back to internal SRAM, which the S3 has enough of (512 KB) for one 150 KB buffer.
 - Push the finished frame with **`pushSprite` over DMA**, so the CPU can start simulating the next frame while the bytes go out.
-- Mirror the image **in the display controller** using LovyanGFX's mirrored rotations (`setRotation(4..7)`, which set the panel's MADCTL scan-direction bits). This costs no CPU.
+- Mirror the image **in the display controller** by choosing a rotation whose MADCTL bits mirror left-right: landscape is rotation 1 (MV|MX), and its left-right mirror is **rotation 7** (adds MY). Rotation 5 would flip top-to-bottom instead (checked against LovyanGFX `Panel_LCD::getMadCtl` in the final review). This costs no CPU.
 
 ## Alternatives considered
 

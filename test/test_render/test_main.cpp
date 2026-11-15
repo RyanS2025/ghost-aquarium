@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "background.h"
+#include "color.h"
 #include "glyphs.h"
 #include "renderer.h"
 #include "seabed.h"
@@ -140,8 +141,29 @@ void test_render_snapshot() {
   std::fclose(out);
 }
 
+// Pins the framebuffer convention: native RGB565 (red = 0xF800). The firmware must therefore
+// call lcd.setSwapBytes(true) before pushImage (LovyanGFX reads a plain uint16_t* as byte-swapped).
+void test_framebuffer_is_native_rgb565() {
+  TEST_ASSERT_EQUAL_HEX16(0xF800, tank::render::rgb565(255, 0, 0));
+  TEST_ASSERT_EQUAL_HEX16(0x07E0, tank::render::rgb565(0, 255, 0));
+  TEST_ASSERT_EQUAL_HEX16(0x001F, tank::render::rgb565(0, 0, 255));
+}
+
+// Review: renderFrame assumed 320×240; a band-sized Frame (ADR 0008's banding upgrade) got
+// writes far past its end. Until banding exists, any other size must be refused untouched.
+void test_render_refuses_non_full_frames() {
+  const auto bg = background();
+  tank::Tank tk(kT, kFx, 3);
+  std::vector<uint16_t> px(W * H, 0xABCD);
+  Frame band{px.data(), W, 40};
+  tank::render::renderFrame(tk, bg.data(), band);
+  for (int i = 0; i < W * H; ++i) TEST_ASSERT_EQUAL_HEX16(0xABCD, px[i]);
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_framebuffer_is_native_rgb565);
+  RUN_TEST(test_render_refuses_non_full_frames);
   RUN_TEST(test_glyph_table_covers_every_scene_character);
   RUN_TEST(test_blit_writes_expected_pixels_and_clips);
   RUN_TEST(test_blit_fractional_scale_covers_scaled_box);

@@ -34,7 +34,12 @@ class Tank {
   const RipplePool& ripples() const { return ripples_; }
   const Plankton* plankton() const { return plankton_; }
   const Seabed& seabed() const { return seabed_; }
-  float time() const { return time_; }
+  // Simulation clock in seconds. double: a float accumulating 1/60 s stalls at 524288 s (~6 days
+  // of 24/7), which froze every animation (final review, Critical).
+  double time() const { return time_; }
+  // Bounded float time for animation phases (wraps every ~18 h; one imperceptible phase skip).
+  float animTime() const;
+  void setClockForTest(double t) { time_ = t; }
   const Tuning& tuning() const { return t_; }
   const FxTuning& fx() const { return fx_; }
 
@@ -53,7 +58,7 @@ class Tank {
   RipplePool ripples_;
   Plankton plankton_[kPlanktonCount];
   Seabed seabed_;
-  float time_ = 0.f;
+  double time_ = 0.0;
   float bubbleAcc_ = 0.f;
 };
 

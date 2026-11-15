@@ -72,8 +72,8 @@ void test_fish_leave_and_return() {
     tk.step(kDt);
     for (int k = 0; k < tk.fishCount(); ++k) {
       const bool away = tk.fish()[k].away;
-      if (away && awaySince[k] < 0.f) awaySince[k] = tk.time();
-      if (!away && awaySince[k] >= 0.f) { ++returns; longest = std::max(longest, tk.time() - awaySince[k]); awaySince[k] = -1.f; }
+      if (away && awaySince[k] < 0.f) awaySince[k] = static_cast<float>(tk.time());
+      if (!away && awaySince[k] >= 0.f) { ++returns; longest = std::max(longest, static_cast<float>(tk.time()) - awaySince[k]); awaySince[k] = -1.f; }
     }
   }
   TEST_ASSERT_TRUE(returns >= 1);
@@ -141,7 +141,7 @@ void test_soak_100k_steps_finite_bounded_and_populated() {
       TEST_ASSERT_TRUE(std::isfinite(f.pos.x) && std::isfinite(f.pos.y));
       TEST_ASSERT_TRUE(std::isfinite(f.vel.x) && std::isfinite(f.vel.y));
       if (!f.away) TEST_ASSERT_TRUE(f.pos.y >= -60.f && f.pos.y <= 240.f);
-      if (f.away && awaySince[k] < 0.f) awaySince[k] = tk.time();
+      if (f.away && awaySince[k] < 0.f) awaySince[k] = static_cast<float>(tk.time());
       if (!f.away) awaySince[k] = -1.f;
       if (f.away) TEST_ASSERT_TRUE(tk.time() - awaySince[k] <= kFx.returnDelayMax + 0.1f);
     }
@@ -149,8 +149,42 @@ void test_soak_100k_steps_finite_bounded_and_populated() {
   TEST_ASSERT_TRUE(minOn >= tk.fishCount() - static_cast<int>(kFx.maxAwayFrac * tk.fishCount()) - 1);
 }
 
+// Review (Critical): a float clock accumulating 1/60 s stalls at 524288 s (~6 days of 24/7):
+// ripples never expired and every animation froze. Time must keep advancing exactly.
+void test_clock_keeps_running_after_six_days() {
+  Tank tk(kT, kFx, 42);
+  tk.setClockForTest(6.0 * 86400.0);
+  const double t0 = tk.time();
+  const float a0 = tk.animTime();
+  for (int i = 0; i < 600; ++i) tk.step(kDt);
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 10.f, static_cast<float>(tk.time() - t0));
+  TEST_ASSERT_FLOAT_WITHIN(0.02f, 10.f, tk.animTime() - a0);
+}
+
+void test_ripples_expire_after_six_days() {
+  Tank tk(kT, kFx, 42);
+  tk.setClockForTest(6.0 * 86400.0);
+  tk.splash(160.f, 120.f, tank::kWhite);
+  for (int i = 0; i < 60 * 4; ++i) tk.step(kDt);
+  for (const auto& r : tk.ripples()) TEST_ASSERT_TRUE(r.age < 3.5f);
+  TEST_ASSERT_TRUE(tk.ripples().count < tank::kMaxRipples);
+}
+
+void test_phases_stay_bounded() {
+  Tank tk(kT, kFx, 5);
+  for (int i = 0; i < 100000; ++i) tk.step(kDt);
+  for (int k = 0; k < tk.fishCount(); ++k) {
+    const auto& f = tk.fish()[k];
+    TEST_ASSERT_TRUE(f.wavePhase >= 0.f && f.wavePhase < 6.2832f);
+    TEST_ASSERT_TRUE(std::fabs(f.wanderAngle) <= 3.1416f);
+  }
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_clock_keeps_running_after_six_days);
+  RUN_TEST(test_ripples_expire_after_six_days);
+  RUN_TEST(test_phases_stay_bounded);
   RUN_TEST(test_tank_spawns_per_layer_counts_and_stratified_depths);
   RUN_TEST(test_stepper_runs_whole_steps);
   RUN_TEST(test_stepper_caps_steps_and_drops_excess);

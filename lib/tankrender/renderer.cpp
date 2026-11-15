@@ -23,7 +23,7 @@ float clampf(float x, float lo, float hi) { return std::min(hi, std::max(lo, x))
 void drawRays(const Tank& tk, Frame& f) {
   const FxTuning& fx = tk.fx();
   if (fx.rays <= 0.f) return;
-  const float t = tk.time();
+  const float t = tk.animTime();
   const float rr = (kScene.ray >> 16) & 255, rg = (kScene.ray >> 8) & 255, rb = kScene.ray & 255;
   const int yb = static_cast<int>(std::floor(kScreen.h * 0.88f)), y0 = static_cast<int>(kSurfaceY);
   for (const Ray& ray : tk.seabed().rays) {
@@ -42,7 +42,7 @@ void drawRays(const Tank& tk, Frame& f) {
 }
 
 void drawPlankton(const Tank& tk, Frame& f) {  // single twinkling pixels
-  const float t = tk.time(), vib = tk.fx().vibrance;
+  const float t = tk.animTime(), vib = tk.fx().vibrance;
   for (int i = 0; i < kPlanktonCount; ++i) {
     const Plankton& p = tk.plankton()[i];
     const Hsl c = rgbToHsl(p.rgb);
@@ -75,7 +75,7 @@ void drawRocks(const Tank& tk, Frame& f) {
 }
 
 void drawSeaweed(const Tank& tk, Frame& f) {
-  const float t = tk.time(), vib = tk.fx().vibrance;
+  const float t = tk.animTime(), vib = tk.fx().vibrance;
   const Hsl b = rgbToHsl(kScene.seaweedBase), tip = rgbToHsl(kScene.seaweedTip);
   for (const Seaweed& s : tk.seabed().seaweed) {
     const int segs = std::max(2, static_cast<int>(s.height / kCellH));
@@ -90,7 +90,7 @@ void drawSeaweed(const Tank& tk, Frame& f) {
 
 void drawCoral(const Tank& tk, Frame& f) {
   if (!tk.fx().reef) return;
-  const float t = tk.time(), vib = tk.fx().vibrance;
+  const float t = tk.animTime(), vib = tk.fx().vibrance;
   for (const Coral& c : tk.seabed().coral) {
     const CoralTemplate& tpl = kCoral[c.tpl % kCoralTemplates];
     const Hsl col = rgbToHsl(kReefColors[c.color % kReefColorCount]);
@@ -126,7 +126,7 @@ void drawSand(const Tank& tk, Frame& f) {
 }
 
 void drawFish(const Tank& tk, Frame& f) {
-  const float t = tk.time();
+  const float t = tk.animTime();
   const FxTuning& fx = tk.fx();
   for (int L = 0; L < kLayerCount; ++L) {
     const Depth& d = kDepth[L];
@@ -154,7 +154,7 @@ void drawFish(const Tank& tk, Frame& f) {
 }
 
 void drawAmbient(const Tank& tk, Frame& f) {
-  const float t = tk.time(), vib = tk.fx().vibrance;
+  const float t = tk.animTime(), vib = tk.fx().vibrance;
   const Tuning& tu = tk.tuning();
   const Hsl bub = rgbToHsl(kScene.bubble);
   const uint16_t bubC = hsl565(bub.h, bub.s, bub.l * 0.8f);
@@ -178,6 +178,9 @@ void drawAmbient(const Tank& tk, Frame& f) {
 void renderFrame(const Tank& tk, const uint16_t* background, Frame& f) {
   f.glyphs = 0;
   f.writes = 0;
+  // Full 320×240 frames only: the background copy and the ray spans assume it. Banding
+  // (ADR 0008 §7) will need a band origin + clipping; until then refuse, never overrun.
+  if (f.w != static_cast<int>(kScreen.w) || f.h != static_cast<int>(kScreen.h)) return;
   const size_t bytes = static_cast<size_t>(f.w) * f.h * sizeof(uint16_t);
   if (background) std::memcpy(f.px, background, bytes);
   else std::memset(f.px, 0, bytes);
