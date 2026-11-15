@@ -167,6 +167,9 @@ const FIELDS = [
   { k: "turnTime",         g: "Turning", fx: true, def: 0.4,  min: 0.1, max: 1.2, step: 0.05 },
   { k: "flipAngle",        g: "Turning", fx: true, def: 100,  min: 60,  max: 180, step: 5 },
   { k: "maxPitch",         g: "Turning", fx: true, def: 25,   min: 15,  max: 85,  step: 1 },
+  { k: "returnDelayMin",   g: "Coming & going", fx: true, def: 2,    min: 0,   max: 20, step: 0.5 },
+  { k: "returnDelayMax",   g: "Coming & going", fx: true, def: 7,    min: 0,   max: 30, step: 0.5 },
+  { k: "maxAwayFrac",      g: "Coming & going", fx: true, def: 0.35, min: 0,   max: 0.8, step: 0.05 },
   { k: "minSpeedFrac",     g: "Turning", fx: true, def: 0.3,  min: 0,   max: 0.8, step: 0.05 },
   { k: "bodyWaveAmp",      g: "Flow", fx: true, def: 0.8,  min: 0, max: 6,   step: 0.1 },
   { k: "bodyWaveHz",       g: "Flow", fx: true, def: 1.4,  min: 0, max: 5,   step: 0.05 },
@@ -303,7 +306,9 @@ function steerEdges(f) {
   const m = T.edgeMargin, k = T.edgeWeight * T.maxForce;
   const fac = (d) => (d < 0 ? 1 : clamp((m - d) / m, 0, 1));
   const top = f.leapT > 0 ? 0 : fac(f.pos.y - SURFACE_Y);   // a leaping fish ignores the surface
-  return v(fac(f.pos.x) * k - fac(W - f.pos.x) * k, top * k - fac(H - 30 - f.pos.y) * k);
+  // Side walls only apply when this fish may not leave right now (see "coming & going").
+  const side = f.sideWalls ? fac(f.pos.x) * k - fac(W - f.pos.x) * k : 0;
+  return v(side, top * k - fac(H - 30 - f.pos.y) * k);
 }
 
 // Reynolds wander: a point on a small circle projected AHEAD of the fish drifts randomly;
@@ -335,7 +340,7 @@ function steerSchool(f, all) {
   let n = 0;
   const sepR = T.separationRadius * BODY_SPACE[f.layer];
   for (const o of all) {
-    if (o === f || o.airborne) continue;
+    if (o === f || o.airborne || o.away) continue;
     const q = nearestOnBody(o, f.pos);
     const dx = f.pos.x - q.x, dy = f.pos.y - q.y, d = Math.hypot(dx, dy);
     if (o.layer !== f.layer) {                 // light cross-layer spacing reduces visual clutter
@@ -414,7 +419,7 @@ function burst(tk, x, y) {                      // tap underwater: sparkles + sc
   for (let i = 0; i < 6; i++) emit(tk, { kind: "bubble", pos: v(x + rng.uniform(-4, 4), y), vel: v(rng.uniform(-8, 8), -rng.uniform(10, 30)), life: 2, max: 2, color: scene.bubble, ch: "o" });
   for (const f of tk.fish) {
     const d = v(f.pos.x - x, f.pos.y - y), dist = len(d);
-    if (dist < 75 && !f.airborne) f.flee = dist < 1e-3 ? v(1, 0) : norm(d), f.boostT = 0.8;   // turn away fast, not instantly
+    if (dist < 75 && !f.airborne && !f.away) f.flee = dist < 1e-3 ? v(1, 0) : norm(d), f.boostT = 0.8;   // turn away fast, not instantly
   }
 }
 
@@ -430,18 +435,48 @@ function startLeap(tk, f) {
 
 function tryAutoLeap(tk) {
   // only fish near the surface, away from the side walls, already heading toward the middle
-  const cands = tk.fish.filter((f) => f.layer > 0 && !f.airborne && f.leapT <= 0 && f.turnP === 0 &&
+  const cands = tk.fish.filter((f) => f.layer > 0 && !f.away && !f.crossing && !f.airborne && f.leapT <= 0 && f.turnP === 0 &&
     f.pos.y < SURFACE_Y + 70 && f.pos.x > LEAP_X_MIN && f.pos.x < LEAP_X_MAX && (f.pos.x < W / 2) === (f.vel.x > 0));
   if (cands.length) startLeap(tk, cands[tk.rng.int(cands.length)]);
+}
+
+// A fish that swam out of view comes back from a random side, at the entry depth with the
+// most open water, sometimes in a new color (reads as a different fish).
+function reenter(tk, f) {
+  const rng = tk.rng, L = f.layer, bodyLen = SPECIES[L].right.length * ADV[L];
+  const fromLeft = rng.uniform(0, 1) < 0.5, edgeX = fromLeft ? 0 : W;
+  let bestY = HOME_MIN, bestD = -1;
+  for (let k = 0; k < 6; k++) {
+    const y = rng.uniform(HOME_MIN, HOME_MAX);
+    let d = Infinity;
+    for (const o of tk.fish) if (o !== f && !o.away && o.layer === L) d = Math.min(d, Math.hypot(edgeX - o.pos.x, y - o.pos.y));
+    if (d > bestD) { bestD = d; bestY = y; }
+  }
+  const sp = T.maxSpeed[L] * rng.uniform(0.55, 0.8);
+  Object.assign(f, {
+    pos: v(fromLeft ? -bodyLen + 2 : W + bodyLen - 2, bestY), vel: v(fromLeft ? sp : -sp, 0),
+    facingRight: fromLeft, tilt: 0, turnP: 0, flipTurn: false, boostT: 0, leapT: 0, flee: null,
+    homeBase: bestY, homeY: bestY, wanderAngle: 0, reverseT: 0, flipCooldown: 2,
+    away: false, crossing: true, leaving: false,
+  });
+  if (rng.uniform(0, 1) < 0.5) f.pal = rng.int(palettes.length);
+  f.body = rigidBody(f, SPECIES[L].right.length, ADV[L]);
 }
 
 // ---------------------------------------------------------------- step
 function step(tk, dt) {
   const rng = tk.rng;
   // 1) forces from one snapshot (order-independent)
+  // Coming & going: fish may swim out the sides while fewer than maxAwayFrac are gone
+  // (counting fish already crossing out), so the tank never empties.
+  const goneOrLeaving = tk.fish.filter((f) => f.away || (f.crossing && f.leaving)).length;
+  const allowExit = goneOrLeaving < Math.floor(T.maxAwayFrac * tk.fish.length);
+  for (const f of tk.fish) f.sideWalls = !f.crossing && !allowExit;
+
   const edgeFrac = [], nav = [];
   const forces = tk.fish.map((f, i) => {
     edgeFrac[i] = 0; nav[i] = v();
+    if (f.away) return v();
     if (f.airborne) return v(0, GRAVITY);
     const a = steerSchool(f, tk.fish), b = steerEdges(f), c = steerWander(f, rng, dt);
     nav[i] = v(b.x + c.x, b.y + c.y);   // "where it wants to go": walls + wander, not neighbours
@@ -468,6 +503,7 @@ function step(tk, dt) {
   // 2) integrate with a turn-rate limit + events
   tk.fish.forEach((f, i) => {
     const ms = T.maxSpeed[f.layer];
+    if (f.away) { f.returnT -= dt; if (f.returnT <= 0) reenter(tk, f); return; }
     if (f.airborne) {
       f.vel.x += forces[i].x * dt; f.vel.y += forces[i].y * dt;
     } else {
@@ -550,6 +586,15 @@ function step(tk, dt) {
     const tiltTarget = clamp(Math.atan2(f.vel.y, Math.abs(f.vel.x) + 1e-6) * 0.8, -tiltMax, tiltMax);
     f.tilt = (f.tilt || 0) + (tiltTarget - (f.tilt || 0)) * Math.min(1, dt * 4);
     f.body = rigidBody(f, n, ADV[f.layer]);
+
+    // crossing a side edge: leaving fish are "away" once the whole body is out of view;
+    // entering fish ignore side walls until they're fully inside
+    const bodyLen = n * ADV[f.layer];
+    if (!f.crossing && !f.airborne && (f.pos.x < 0 || f.pos.x > W)) { f.crossing = true; f.leaving = true; }
+    if (f.crossing && f.pos.x > bodyLen && f.pos.x < W - bodyLen) { f.crossing = false; f.leaving = false; }
+    if (f.crossing && (f.pos.x < -bodyLen - 4 || f.pos.x > W + bodyLen + 4)) {
+      f.away = true; f.returnT = rng.uniform(T.returnDelayMin, Math.max(T.returnDelayMin, T.returnDelayMax));
+    }
 
     // surface crossings → splashes
     if (!f.airborne && f.pos.y < SURFACE_Y && f.vel.y < 0) { f.airborne = true; splash(tk, f.pos.x, Math.abs(f.vel.y), fishColorHead(f)); }
@@ -739,7 +784,7 @@ function draw(tk) {
     const fp = FONT_PX[L], adv = ADV[L];
     ctx.font = `bold ${fp}px monospace`;
     for (const f of tk.fish) {
-      if (f.layer !== L) continue;
+      if (f.layer !== L || f.away) continue;
       const g = SPECIES[L];
       const headFirst = f.facingRight ? [...g.right].reverse() : [...g.left];
       const n = headFirst.length;
@@ -914,7 +959,7 @@ function frame(now) {
   if (elapsed > 0) fps = fps * 0.95 + (1 / elapsed) * 0.05;
   if (now - hudAt > 250) {
     hudAt = now;
-    $("fps").textContent = fps.toFixed(0); $("nfish").textContent = tank.fish.length;
+    $("fps").textContent = fps.toFixed(0); $("nfish").textContent = tank.fish.filter((f) => !f.away).length + "/" + tank.fish.length;
     $("npart").textContent = tank.particles.length; $("seed").textContent = seed;
   }
   requestAnimationFrame(frame);
