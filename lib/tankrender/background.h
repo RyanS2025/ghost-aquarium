@@ -9,7 +9,7 @@
 
 namespace tank::render {
 
-// `out` must hold 320×240 pixels.
+// `out` must hold kScreenW × kScreenH pixels.
 void buildBackground(uint16_t* out, const FxTuning& fx);
 
 }  // namespace tank::render

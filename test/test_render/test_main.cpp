@@ -17,7 +17,8 @@
 using tank::render::Frame;
 
 namespace {
-constexpr int W = 320, H = 240;
+constexpr int W = tank::kScreenW, H = tank::kScreenH;
+constexpr int kSeabedTop = H * 3 / 4;  // rocks, sand and starfish are all below this row
 const tank::Tuning kT{};
 const tank::FxTuning kFx{};
 
@@ -62,8 +63,8 @@ void test_blit_writes_expected_pixels_and_clips() {
 void test_blit_fractional_scale_covers_scaled_box() {
   std::vector<uint16_t> px(W * H, 0);
   Frame a{px.data(), W, H}, b{px.data(), W, H};
-  a.blit('#', 100.f, 100.f, 1.f, 1);
-  b.blit('#', 200.f, 100.f, 2.f, 1);
+  a.blit('#', 30.f, 60.f, 1.f, 1);
+  b.blit('#', 90.f, 60.f, 2.f, 1);
   TEST_ASSERT_EQUAL_UINT32(a.writes * 4, b.writes);
 }
 
@@ -83,7 +84,7 @@ void test_background_edges_are_black() {
 
 void test_background_has_glow_inside() {
   const auto bg = background();
-  TEST_ASSERT_NOT_EQUAL(0, bg[110 * W + 160]);
+  TEST_ASSERT_NOT_EQUAL(0, bg[(H / 2) * W + W / 2]);
 }
 
 void test_render_frame_is_deterministic() {
@@ -95,7 +96,7 @@ void test_render_frame_is_deterministic() {
   tank::render::renderFrame(a, bg.data(), fa);
   tank::render::renderFrame(b, bg.data(), fb);
   TEST_ASSERT_EQUAL_MEMORY(pa.data(), pb.data(), pa.size() * sizeof(uint16_t));
-  TEST_ASSERT_TRUE(fa.glyphs > 100);  // something was actually drawn
+  TEST_ASSERT_TRUE(fa.glyphs > 50);  // something was actually drawn
 }
 
 void test_render_budget() {
@@ -178,7 +179,7 @@ void test_baked_backdrop_matches_live_render_above_seabed() {
   Frame fb{baked.data(), W, H};
   tank::render::renderFrame(tk, backdrop.data(), fb, tank::render::kBackdropHasRaysAndScenery);
 
-  for (int y = 0; y < 180; ++y)
+  for (int y = 0; y < kSeabedTop; ++y)
     for (int x = 0; x < W; ++x) TEST_ASSERT_EQUAL_HEX16(live[y * W + x], baked[y * W + x]);
   TEST_ASSERT_TRUE(fb.glyphs < fl.glyphs);  // rocks + sand no longer drawn per frame
 }
@@ -201,15 +202,17 @@ void test_bake_static_scenery_only_touches_the_seabed() {
   const auto before = bg;
   tank::Tank tk(kT, kFx, 2);
   tank::render::bakeStaticScenery(tk, bg.data());
-  for (int y = 0; y < 180; ++y)
+  for (int y = 0; y < kSeabedTop; ++y)
     for (int x = 0; x < W; ++x) TEST_ASSERT_EQUAL_HEX16(before[y * W + x], bg[y * W + x]);
   int changed = 0;
   for (size_t i = 0; i < bg.size(); ++i) changed += bg[i] != before[i];
-  TEST_ASSERT_TRUE(changed > 200);  // rocks and sand were drawn
+  TEST_ASSERT_TRUE(changed > 100);  // rocks and sand were drawn
 }
 
 // Demo frames for the README GIF, through the exact firmware path (baked scenery + one ray band
 // per frame). Opt-in: GHOST_FRAMES=<dir> pio test -e native -f test_render  (see `make gif`).
+// GHOST_FRAMES_N / GHOST_FRAMES_STEPS set the clip length and sim steps per frame (default 200 × 3
+// = 10 s at 20 fps); GHOST_FRAMES_LEAPS=0 turns off the staged leaps, as on the device (`make clip`).
 void test_render_demo_frames() {
   const char* dir = std::getenv("GHOST_FRAMES");
   if (!dir) TEST_IGNORE_MESSAGE("set GHOST_FRAMES=<dir> to write demo frames");
@@ -219,15 +222,17 @@ void test_render_demo_frames() {
   tank::render::bakeStaticScenery(tk, bg.data());
   std::vector<uint16_t> backdrop(W * H), px(W * H);
   for (int b = 0; b < tank::render::kRayBands; ++b) tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), b);
-  constexpr int kFrames = 200, kStepsPerFrame = 3;  // 20 fps GIF, real-time motion
+  const auto envInt = [](const char* k, int def) { const char* v = std::getenv(k); return v ? std::atoi(v) : def; };
+  const int kFrames = envInt("GHOST_FRAMES_N", 200), kStepsPerFrame = envInt("GHOST_FRAMES_STEPS", 3);  // 20 fps, real time
+  const bool stagedLeaps = envInt("GHOST_FRAMES_LEAPS", 1) != 0;
   for (int n = 0; n < kFrames; ++n) {
     for (int s = 0; s < kStepsPerFrame; ++s) tk.step(1.f / 60.f);
-    if (n % 40 == 10) tk.tryLeap();  // show off a leap + splash when a fish is in position
+    if (stagedLeaps && n % 40 == 10) tk.tryLeap();  // show off a leap + splash when a fish is in position
     tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), n % tank::render::kRayBands);
     Frame f{px.data(), W, H};
     tank::render::renderFrame(tk, backdrop.data(), f, tank::render::kBackdropHasRaysAndScenery);
     char path[512];
-    std::snprintf(path, sizeof(path), "%s/frame_%03d.ppm", dir, n);
+    std::snprintf(path, sizeof(path), "%s/frame_%04d.ppm", dir, n);
     FILE* out = std::fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(out);
     std::fprintf(out, "P6\n%d %d\n255\n", W, H);
@@ -240,7 +245,7 @@ void test_render_demo_frames() {
 }
 
 // Banded rendering (ADR 0008 §7): the display list is built once per frame, then rasterised
-// into 40-row bands that DMA can send while the next band is drawn. Stitched bands must be
+// into 32-row bands (as the firmware does) that DMA can send while the next band is drawn. Stitched bands must be
 // byte-identical to the full-frame render, in both the live and the baked-backdrop modes.
 namespace {
 void expectBandsEqualFullFrame(uint32_t flags) {
@@ -258,7 +263,8 @@ void expectBandsEqualFullFrame(uint32_t flags) {
 
   static tank::render::DisplayList list;
   tank::render::buildDisplayList(tk, list, flags);
-  constexpr int kBandH = 40;
+  constexpr int kBandH = 32;
+  static_assert(H % kBandH == 0, "bands must tile the screen");
   std::vector<uint16_t> stitched(W * H), band(W * kBandH);
   for (int b = 0; b < H / kBandH; ++b) {
     Frame fb{band.data(), W, kBandH};
@@ -285,7 +291,7 @@ void test_swap_bytes_in_place() {
 void test_display_list_fits_a_busy_frame() {
   tank::Tank tk(kT, kFx, 7);
   static tank::render::DisplayList list;
-  for (int i = 0; i < 20; ++i) tk.splash(40.f + 12.f * i, 200.f, tank::kWhite);  // particle pool full
+  for (int i = 0; i < 20; ++i) tk.splash(6.f + 6.f * i, 200.f, tank::kWhite);  // particle pool full
   tk.step(1.f / 60.f);
   tank::render::buildDisplayList(tk, list, tank::render::kLive);
   TEST_ASSERT_EQUAL_UINT32(0, list.dropped);

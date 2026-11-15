@@ -31,7 +31,7 @@ struct DrawOp {
   char ch;
   uint8_t scale2;    // font scale × 2 (2, 3, 4 → 1×, 1.5×, 2×)
 };
-constexpr int kMaxOps = 1024;  // ~300 glyphs calm, ≤ 450 busy (measured): plenty of headroom
+constexpr int kMaxOps = 512;   // 320×240 measured ~300 calm, ≤ 450 busy; 128×128 is far fewer
 
 // Everything to draw this frame, in draw order. All colour/animation math happens while
 // building it, once, so rasterising N bands doesn't repeat that work N times. ~8 KB: keep static.
@@ -55,7 +55,7 @@ void rasterize(const Tank& tk, const DisplayList& list, const uint16_t* backgrou
 // RGB565 → panel byte order in place, so DMA can send the band without CPU conversion.
 void swapBytes(uint16_t* px, std::size_t n);
 
-// Draws the static seabed (rocks, sand) into a 320×240 background buffer, once.
+// Draws the static seabed (rocks, sand) into a kScreen-sized background buffer, once.
 void bakeStaticScenery(const Tank& tk, uint16_t* background);
 
 // Rebuilds rows of `band` (0..kRayBands-1) in `backdrop` as `base` + the light rays at tk.animTime().

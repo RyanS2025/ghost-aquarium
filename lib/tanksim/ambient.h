@@ -9,7 +9,7 @@
 
 namespace tank {
 
-constexpr int kMaxParticles = 96, kMaxBubbles = 24, kMaxRipples = 12, kPlanktonCount = 32;
+constexpr int kMaxParticles = 64, kMaxBubbles = 12, kMaxRipples = 12, kPlanktonCount = 12;
 
 struct Bubble {
   Vec2 pos;
@@ -47,7 +47,7 @@ float seaweedSway(float hf, float t, float phase, const Tuning& tu);
 float surfaceAt(const RipplePool& ripples, float x, float t);
 
 // Ripples are ignored beyond this distance (amplitude there is < 12% of the ripple's): saves work.
-constexpr float kRippleReach = 120.f;
+constexpr float kRippleReach = 64.f;
 
 // The whole surface in one pass, at x0 + k·dx for k < n (same values as surfaceAt; the renderer
 // uses this: angle-addition recurrences for the base waves, per-ripple constants hoisted).

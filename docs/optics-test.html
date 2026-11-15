@@ -1,0 +1,426 @@
+<title>Cardboard Ghost Test</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one reading column on a cutting-mat grid; figures are technical drawings in mm; the test screen is a full-black overlay. */
+:root {
+  --bg: #edf1ef; --panel: #e0e7e3; --ink: #14211c; --muted: #536660; --line: #b7c6bf;
+  --ghost: #08808c; --ghost-soft: rgba(8,128,140,.14); --mask: #1b2420;
+  --display: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1613; --panel: #16221e; --ink: #dbe7e2; --muted: #8fa49c; --line: #2b3c36;
+  --ghost: #45dfe9; --ghost-soft: rgba(69,223,233,.14); --mask: #040706; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d1613; --panel: #16221e; --ink: #dbe7e2; --muted: #8fa49c; --line: #2b3c36;
+  --ghost: #45dfe9; --ghost-soft: rgba(69,223,233,.14); --mask: #040706; color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 44px; }
+header { display: flex; flex-direction: column; gap: 12px; padding-block: 28px 8px;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 24px 24px; background-position: -1px -1px;
+  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent); mask-image: linear-gradient(180deg, #000 30%, transparent); }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ghost); }
+h1 { font: 700 clamp(34px, 7vw, 54px)/1.02 var(--display); margin: 0; letter-spacing: -.02em; text-wrap: balance; }
+h2 { font: 700 26px/1.15 var(--display); margin: 0; text-wrap: balance; }
+h3 { font: 600 18px/1.3 var(--display); margin: 0; }
+p { margin: 0; max-width: 65ch; }
+.lede { font-size: 18px; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 16px; }
+.mono, code { font-family: var(--mono); font-size: .92em; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+figure .draw { overflow-x: auto; }
+svg { display: block; max-width: 100%; height: auto; color: var(--ink); font-family: var(--mono); }
+figcaption { font-size: 14px; color: var(--muted); max-width: 65ch; }
+svg .t { font-size: 12px; fill: currentColor; }
+svg .tm { font-size: 12px; fill: var(--muted); }
+svg .tg { font-size: 12px; fill: var(--ghost); font-weight: 600; }
+svg .g-stroke { stroke: var(--ghost); }
+svg .g-fill { fill: var(--ghost); }
+svg .g-soft { fill: var(--ghost-soft); }
+svg .panel { fill: var(--panel); }
+svg .mask { fill: var(--mask); }
+svg .muted-stroke { stroke: var(--muted); }
+
+.checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.check { padding: 14px 16px; background: var(--panel); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.check b { font: 600 15px/1.3 var(--display); }
+.check span { font-size: 14px; color: var(--muted); }
+@media (max-width: 520px) { .checks { grid-template-columns: 1fr; } }
+
+ul.mat { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; max-width: 65ch; }
+ul.mat li { display: grid; grid-template-columns: 130px 1fr; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+ul.mat li b { font-weight: 600; }
+ul.mat li span { color: var(--muted); font-size: 15px; min-width: 0; }
+@media (max-width: 520px) { ul.mat li { grid-template-columns: 1fr; gap: 2px; } }
+
+ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 28px; }
+ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 4px 14px; }
+ol.steps > li::before { content: counter(step); grid-row: span 2; font: 700 22px/1 var(--display); color: var(--ghost);
+  width: 38px; height: 38px; border: 1.5px solid var(--ghost); border-radius: 50%; display: grid; place-items: center; }
+ol.steps > li > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+ol.steps ul { margin: 0; padding-left: 20px; max-width: 62ch; }
+ol.steps ul li + li { margin-top: 4px; }
+.note { font-size: 14px; color: var(--muted); }
+
+.tool { background: var(--panel); border-radius: 8px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.tool label { font-weight: 500; }
+.ruler { overflow-x: auto; padding-block: 6px; }
+.bar { height: 22px; background: var(--ghost); border-radius: 2px; position: relative; }
+.bar::before, .bar::after { content: ""; position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); }
+.bar::before { left: 0; } .bar::after { right: 0; }
+input[type=range] { width: 100%; accent-color: var(--ghost); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button { font: 600 15px/1 var(--body); padding: 12px 18px; border-radius: 6px; border: 1.5px solid var(--ghost); cursor: pointer;
+  background: var(--ghost); color: var(--bg); }
+button.ghostbtn { background: transparent; color: var(--ink); border-color: var(--line); }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--ghost); outline-offset: 2px; }
+.readout { font-family: var(--mono); font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); }
+th { font: 600 13px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+td:first-child { font-weight: 500; width: 40%; }
+
+/* Test screen: deliberately pure black in every theme, like the OLED it imitates. */
+#screen { position: fixed; inset: 0; background: #000; z-index: 50; display: flex; align-items: center; justify-content: center; touch-action: manipulation; }
+#stage { position: relative; }
+#stage.mirror { transform: scaleX(-1); }
+#clip, #tank { position: absolute; inset: 0; width: 100%; height: 100%; }
+#clip { image-rendering: pixelated; object-fit: fill; background: #000; }
+#bar { position: fixed; top: 0; left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px));
+  background: #0b0f0e; transition: opacity .3s; }
+#bar button { font-size: 13px; padding: 9px 12px; background: #111a18; color: #cfe; border: 1px solid #2c3b37; }
+#bar button[aria-pressed="true"] { border-color: #45dfe9; color: #45dfe9; }
+#bar.hide { opacity: 0; pointer-events: none; }
+#count { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 0; right: 0; text-align: center; color: #7a8; font: 13px var(--mono); }
+@media (prefers-reduced-motion: reduce) { #bar { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Ghost Aquarium · Phase 1 optics test</div>
+    <h1>Cardboard Ghost Test</h1>
+    <p class="lede">Build a small cardboard box, put your phone under it, and see what a 27 mm ghost tank really looks like. It takes about 30 minutes and costs nothing. Do it before you buy the 1.5″ OLED.</p>
+  </header>
+
+  <section>
+    <h2>How the trick works</h2>
+    <p>The screen lies face-up. A clear sheet above it, tilted at 45°, reflects the screen's light toward your eye. Your brain traces that light straight back, so the fish seem to stand upright behind the sheet, in front of a black wall. Black pixels give off no light, so only the fish show.</p>
+    <figure>
+      <div class="draw">
+      <svg viewBox="0 0 640 290" role="img" aria-label="Side view: light rises from the phone's 27 mm window, hits the 45 degree sheet, and travels horizontally to the eye, so the ghost appears standing upright at the back wall.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="g-fill"/>
+          </marker>
+        </defs>
+        <line x1="20" y1="250" x2="620" y2="250" class="muted-stroke" stroke-width="1"/>
+        <rect x="320" y="82" width="150" height="150" class="panel"/>
+        <text x="330" y="226" class="tm">side wall</text>
+        <line x1="320" y1="82" x2="476" y2="82" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="398" y="74" class="tm" text-anchor="middle">roof (optional)</text>
+        <rect x="470" y="82" width="6" height="150" fill="currentColor"/>
+        <text x="488" y="100" class="t">black back wall</text>
+        <rect x="250" y="232" width="290" height="18" rx="4" class="panel" stroke="currentColor" stroke-width="1.5"/>
+        <rect x="252" y="228" width="122" height="4" class="mask"/>
+        <rect x="455" y="228" width="83" height="4" class="mask"/>
+        <rect x="374" y="228" width="81" height="4" class="g-fill"/>
+        <line x1="470" y1="232" x2="320" y2="82" class="g-stroke" stroke-width="3" stroke-linecap="round"/>
+        <line x1="306" y1="94" x2="334" y2="96" class="muted-stroke" stroke-width="1"/>
+        <text x="302" y="98" class="t" text-anchor="end">clear sheet at 45°</text>
+        <line x1="410" y1="226" x2="410" y2="176" class="g-stroke" stroke-width="2" marker-end="url(#ah)"/>
+        <line x1="408" y1="172" x2="100" y2="172" class="g-stroke" stroke-width="2" marker-end="url(#ah)"/>
+        <line x1="412" y1="172" x2="462" y2="172" class="g-stroke" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <rect x="459" y="136" width="7" height="81" class="g-soft" stroke-width="1.5" stroke-dasharray="4 3" style="stroke: var(--ghost)"/>
+        <text x="488" y="160" class="tg">ghost appears here</text>
+        <text x="488" y="176" class="tm">upright, 27 mm tall</text>
+        <text x="402" y="198" class="tm" text-anchor="end">light rises</text>
+        <text x="250" y="164" class="tm" text-anchor="middle">reflects toward you</text>
+        <ellipse cx="78" cy="172" rx="15" ry="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="84" cy="172" r="4" fill="currentColor"/>
+        <text x="40" y="150" class="t">your eye, level with the sheet</text>
+        <text x="395" y="272" class="tm" text-anchor="middle">phone, face up, under black paper with a 27 mm window</text>
+      </svg>
+      </div>
+      <figcaption>Side view, to scale (3 px per mm). The ghost forms on the line where the sheet meets the back wall. Window light nearer to you appears higher in the ghost, so the top of the tank image must point toward you.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What this test answers</h2>
+    <div class="checks">
+      <div class="check"><b>Size</b><span>Is a 27 × 27 mm ghost big enough on your desk?</span></div>
+      <div class="check"><b>Brightness</b><span>Can you see it clearly in a dim room?</span></div>
+      <div class="check"><b>Double image</b><span>Does the sheet's thickness show two overlapping copies?</span></div>
+      <div class="check"><b>Mirroring</b><span>Does the word GHOST read correctly in the reflection?</span></div>
+    </div>
+    <p class="note">If your phone has an OLED screen (most iPhones from the X onward, except the XR, 11 and SE), its black is true black, like the 1.5″ OLED. This is then a close preview of the real thing.</p>
+  </section>
+
+  <section>
+    <h2>What you need</h2>
+    <ul class="mat">
+      <li><b>Thin cardboard</b><span>A cereal box or shipping-box side, at least 160 × 110 mm</span></li>
+      <li><b>Black</b><span>Black paper, or a black marker or matte paint for the inside faces. Avoid anything glossy</span></li>
+      <li><b>Clear sheet</b><span>The thinner and flatter the better: a CD case lid (about 1 mm), clear packaging plastic, or a transparency sheet. Picture-frame glass works but doubles more</span></li>
+      <li><b>Tools</b><span>Ruler, scissors or a craft knife, tape</span></li>
+      <li><b>Your phone</b><span>Open this page on it for the test screen</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Build it</h2>
+    <ol class="steps">
+      <li>
+        <h3>Cut and fold the hood</h3>
+        <div>
+          <p>Cut one strip of cardboard 160 × 50 mm. Fold it at 50 mm and 110 mm into a U: side, back, side. Cut the sheet and the optional roof too.</p>
+          <figure>
+            <div class="draw">
+            <svg viewBox="0 0 680 290" role="img" aria-label="Cut pattern: a 160 by 50 millimetre strip folded at 50 and 110 millimetres, with a 45 degree guide line on each side panel; a 60 by 50 roof; a 58 by 71 clear sheet.">
+              <rect x="40" y="50" width="320" height="100" class="panel" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="140" y1="50" x2="140" y2="150" stroke="currentColor" stroke-width="1.5" stroke-dasharray="6 4"/>
+              <line x1="260" y1="50" x2="260" y2="150" stroke="currentColor" stroke-width="1.5" stroke-dasharray="6 4"/>
+              <line x1="140" y1="150" x2="40" y2="50" class="g-stroke" stroke-width="2"/>
+              <line x1="260" y1="150" x2="360" y2="50" class="g-stroke" stroke-width="2"/>
+              <text x="48" y="140" class="t">side</text>
+              <text x="200" y="98" class="t" text-anchor="middle">back</text>
+              <text x="200" y="114" class="tm" text-anchor="middle">most important to black out</text>
+              <text x="352" y="140" class="t" text-anchor="end">side</text>
+              <text x="90" y="40" class="tm" text-anchor="middle">50</text>
+              <text x="200" y="40" class="tm" text-anchor="middle">60</text>
+              <text x="310" y="40" class="tm" text-anchor="middle">50</text>
+              <text x="30" y="104" class="tm" text-anchor="end">50</text>
+              <text x="200" y="172" class="tm" text-anchor="middle">bottom edge rests on the phone · 160 mm long</text>
+              <rect x="400" y="50" width="120" height="100" class="panel" stroke="currentColor" stroke-width="1.5"/>
+              <text x="460" y="98" class="t" text-anchor="middle">roof</text>
+              <text x="460" y="114" class="tm" text-anchor="middle">optional</text>
+              <text x="460" y="40" class="tm" text-anchor="middle">60</text>
+              <text x="460" y="172" class="tm" text-anchor="middle">60 × 50 mm</text>
+              <rect x="550" y="50" width="116" height="142" class="g-soft" stroke="currentColor" stroke-width="1.5"/>
+              <text x="608" y="118" class="t" text-anchor="middle">clear</text>
+              <text x="608" y="134" class="t" text-anchor="middle">sheet</text>
+              <text x="608" y="40" class="tm" text-anchor="middle">58</text>
+              <text x="608" y="214" class="tm" text-anchor="middle">58 × 71 mm</text>
+              <line x1="40" y1="256" x2="80" y2="256" stroke="currentColor" stroke-width="1.5"/>
+              <text x="88" y="260" class="t">cut</text>
+              <line x1="150" y1="256" x2="190" y2="256" stroke="currentColor" stroke-width="1.5" stroke-dasharray="6 4"/>
+              <text x="198" y="260" class="t">fold</text>
+              <line x1="260" y1="256" x2="300" y2="256" class="g-stroke" stroke-width="2"/>
+              <text x="308" y="260" class="t">45° sheet guide (draw on the inside)</text>
+            </svg>
+            </div>
+            <figcaption>Flat pattern, 2 px per mm. Each side panel is a 50 mm square, so its corner-to-corner diagonal is exactly 45°. The guide runs from the bottom corner at the back fold to the top corner at the front.</figcaption>
+          </figure>
+        </div>
+      </li>
+      <li>
+        <h3>Black out the inside</h3>
+        <div>
+          <p>Color every inside face black, the back wall most of all. Any lit or shiny surface behind the sheet shows up in the reflection. Draw the two 45° guides after the black, with a pencil or a silver pen so you can still see them.</p>
+        </div>
+      </li>
+      <li>
+        <h3>Tape in the sheet</h3>
+        <div>
+          <ul>
+            <li>Peel any protective film off the sheet and wipe off fingerprints.</li>
+            <li>Rest the sheet on the two guides. Its bottom edge touches the bottom of the back wall, and its top edge reaches the top front corners.</li>
+            <li>Tape it along the outer edges only. Keep tape off the middle, where you look through.</li>
+          </ul>
+          <p class="note">Trim the sheet if it bows between the walls. It has to lie flat, or the ghost warps.</p>
+        </div>
+      </li>
+      <li>
+        <h3>Add the roof (optional)</h3>
+        <div><p>Tape the roof on top, black side down. It blocks ceiling light from bouncing off the sheet and washing out the ghost.</p></div>
+      </li>
+      <li>
+        <h3>Set up your phone</h3>
+        <div>
+          <ul>
+            <li>Turn brightness all the way up.</li>
+            <li>Set Auto-Lock to Never for now, and turn on Do Not Disturb so no notification lights up the box.</li>
+            <li>Calibrate the size below once, then tap <b>Start test screen</b>.</li>
+          </ul>
+        </div>
+      </li>
+      <li>
+        <h3>Cut the mask and lay the phone down</h3>
+        <div>
+          <p>Cut black paper the size of your phone, with a 27 × 27 mm square window in the middle. Lay the phone face-up with its <b>camera end toward you</b>. Tap <b>Align</b>, then lay the paper so the window sits exactly over the gray square outline. Tape the corners.</p>
+          <p class="note">The mask hides the rest of the screen, including the browser bar, so only a 27 mm square of light reaches the sheet. That's exactly the size of the OLED's visible area.</p>
+        </div>
+      </li>
+      <li>
+        <h3>Place the hood</h3>
+        <div>
+          <p>Set the hood over the window with the open side toward you. Leave about 5 mm between the back wall and the window's far edge, and center the window between the side walls.</p>
+          <figure>
+            <div class="draw">
+            <svg viewBox="0 0 400 340" role="img" aria-label="Top view: the phone lies with its camera end toward the viewer; the hood's back wall sits 5 millimetres beyond the 27 millimetre window, side walls either side, open toward the viewer.">
+              <rect x="40" y="30" width="116" height="240" rx="14" class="mask" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="76.5" y="138.5" width="43" height="43" class="g-soft" style="stroke: var(--ghost)" stroke-width="1.5"/>
+              <text x="98" y="164" class="tg" text-anchor="middle">&gt;&lt;&gt;</text>
+              <line x1="50" y1="130.5" x2="146" y2="130.5" stroke="currentColor" stroke-width="5"/>
+              <line x1="50" y1="130.5" x2="50" y2="210.5" stroke="currentColor" stroke-width="2.5"/>
+              <line x1="146" y1="130.5" x2="146" y2="210.5" stroke="currentColor" stroke-width="2.5"/>
+              <line x1="50" y1="210.5" x2="146" y2="210.5" class="muted-stroke" stroke-width="1" stroke-dasharray="3 4"/>
+              <circle cx="98" cy="258" r="4" class="panel" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="98" y1="320" x2="98" y2="290" stroke="currentColor" stroke-width="1.5" marker-end="url(#ah2)"/>
+              <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+              <text x="108" y="318" class="t">you look from here</text>
+              <line x1="150" y1="126" x2="196" y2="112" class="muted-stroke"/>
+              <text x="200" y="116" class="t">back wall</text>
+              <line x1="124" y1="134" x2="196" y2="138" class="muted-stroke"/>
+              <text x="200" y="142" class="t">5 mm gap</text>
+              <line x1="124" y1="164" x2="196" y2="168" class="muted-stroke"/>
+              <text x="200" y="172" class="tg">27 mm window</text>
+              <line x1="150" y1="196" x2="196" y2="198" class="muted-stroke"/>
+              <text x="200" y="202" class="t">side walls, 60 mm apart</text>
+              <text x="200" y="228" class="tm">front stays open</text>
+              <line x1="104" y1="258" x2="196" y2="258" class="muted-stroke"/>
+              <text x="200" y="262" class="t">camera end toward you</text>
+            </svg>
+            </div>
+            <figcaption>Top view, 1.6 px per mm. The window sits fully between the back wall and the front edge, so the whole tank lands on the sheet.</figcaption>
+          </figure>
+        </div>
+      </li>
+      <li>
+        <h3>Look</h3>
+        <div><p>Dim the room. Lower your head until your eye is level with the middle of the sheet, about 30–50 cm away, and look through the open front. The fish should hang in the air at the back wall. Tap <b>Text check</b> and make sure GHOST reads correctly.</p></div>
+      </li>
+    </ol>
+  </section>
+
+  <section id="test">
+    <h2>Test screen</h2>
+    <p>Open this page on the phone you'll put in the box. The test screen plays 60 seconds of the real tank: frames drawn by the same C++ renderer the ESP32 runs, at 128 × 128 and 30 fps, shown at 27 mm and mirrored for the reflector.</p>
+    <div class="tool">
+      <label for="ppm">Calibrate: hold a ruler to the screen and drag until the bar is exactly 40 mm</label>
+      <div class="ruler"><div class="bar" id="calbar"></div></div>
+      <input type="range" id="ppm" min="3" max="9" step="0.02" value="6.1">
+      <div class="readout" id="readout">–</div>
+      <div class="row">
+        <button id="start" type="button">Start test screen</button>
+        <span class="note">Tap the black screen to show the controls again.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>If something looks wrong</h2>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>What you see</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>GHOST reads backwards</td><td>Tap <b>Mirror</b> to switch it.</td></tr>
+          <tr><td>Tank is upside down (sand on top)</td><td>Turn the phone around so the camera end points the other way, then re-check the text.</td></tr>
+          <tr><td>Two overlapping copies of each fish</td><td>The sheet is too thick. Try thinner plastic. The real build uses 0.76 mm PETG.</td></tr>
+          <tr><td>Ghost is faint</td><td>Darken the room, add the roof, and make sure brightness is at maximum.</td></tr>
+          <tr><td>A gray square around the fish</td><td>Your phone has an LCD, which can't show true black. This is the glow the OLED removes, so it isn't a fail.</td></tr>
+          <tr><td>Top or bottom of the tank is cut off</td><td>Slide the hood so the whole window sits between the back wall and the front edge.</td></tr>
+          <tr><td>You see the phone, not a ghost</td><td>Your eye is too high. Look straight through the front at sheet height.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Report back</h2>
+    <p>Note four things: whether 27 mm feels big enough, how bright it is in a dim room, whether you see a double image, and which Mirror setting read correctly. That confirms or overturns the display decision before ordering parts.</p>
+  </section>
+</div>
+
+<div id="screen" hidden>
+  <div id="stage" class="mirror">
+    <video id="clip" src="media/optics-test/tank.mp4" muted loop playsinline preload="auto" aria-label="The real firmware tank: ASCII fish on black"></video>
+    <canvas id="tank" aria-hidden="true"></canvas>
+  </div>
+  <div id="bar">
+    <button id="bMirror" type="button" aria-pressed="true">Mirror</button>
+    <button id="bText" type="button" aria-pressed="false">Text check</button>
+    <button id="bAlign" type="button">Align (20 s)</button>
+    <button id="bExit" type="button">Exit</button>
+  </div>
+  <div id="count"></div>
+</div>
+
+<script>
+(() => {
+  const KEY = "ghost-box-ppm";
+  const ppmIn = document.getElementById("ppm"), calbar = document.getElementById("calbar"), readout = document.getElementById("readout");
+  let ppm = 6.1;
+  try { const v = parseFloat(localStorage.getItem(KEY)); if (v >= 3 && v <= 9) ppm = v; } catch (_) {}
+  ppmIn.value = ppm;
+  function setPpm(v) {
+    ppm = v;
+    calbar.style.width = (40 * ppm) + "px";
+    readout.textContent = "1 mm = " + ppm.toFixed(2) + " px · tank = 27 mm = " + Math.round(27 * ppm) + " px";
+    try { localStorage.setItem(KEY, String(ppm)); } catch (_) {}
+  }
+  ppmIn.addEventListener("input", () => setPpm(parseFloat(ppmIn.value)));
+  setPpm(ppm);
+
+  const screen = document.getElementById("screen"), cv = document.getElementById("tank"), ctx = cv.getContext("2d");
+  const bar = document.getElementById("bar"), count = document.getElementById("count");
+  const bMirror = document.getElementById("bMirror"), bText = document.getElementById("bText");
+  let running = false, raf = 0, textMode = false, alignUntil = 0, hideTimer = 0, wake = null, scale = 1;
+  const N = 128, CW = 6;
+
+  const stage = document.getElementById("stage"), clip = document.getElementById("clip");
+
+  function size() {
+    const css = Math.round(27 * ppm), dpr = window.devicePixelRatio || 1;
+    stage.style.width = stage.style.height = css + "px";
+    const px = Math.max(N, Math.round(css * dpr));
+    cv.width = cv.height = px; scale = px / N;
+  }
+
+  // The video is the tank; the canvas on top only shows the text check and the alignment outline.
+  function draw() {
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, N, N);
+    const mono = getComputedStyle(document.body).getPropertyValue("--mono");
+    if (textMode) {
+      ctx.fillStyle = "#000"; ctx.fillRect(0, 0, N, N);
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.font = "700 20px " + mono; ctx.fillStyle = "#45dfe9"; ctx.fillText("GHOST", 64, 44);
+      ctx.font = "600 10px " + mono; ctx.fillStyle = "#cfe"; ctx.fillText("reads left → right", 64, 72);
+    }
+    const left_s = Math.ceil((alignUntil - performance.now()) / 1000);
+    if (left_s > 0) { ctx.strokeStyle = "#8a948f"; ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, N - 1, N - 1); count.textContent = "Align the mask window over the outline · " + left_s + " s"; }
+    else count.textContent = "";
+  }
+  function loop() { if (!running) return; draw(); raf = requestAnimationFrame(loop); }
+
+  function showBar() { bar.classList.remove("hide"); clearTimeout(hideTimer); hideTimer = setTimeout(() => bar.classList.add("hide"), 4000); }
+  async function start() {
+    screen.hidden = false; running = true; size(); showBar(); raf = requestAnimationFrame(loop);
+    try { clip.currentTime = 0; await clip.play(); } catch (_) {}
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch (_) { wake = null; }
+  }
+  function stop() { running = false; cancelAnimationFrame(raf); clip.pause(); screen.hidden = true; try { wake && wake.release(); } catch (_) {} wake = null; }
+
+  document.getElementById("start").addEventListener("click", start);
+  document.getElementById("bExit").addEventListener("click", e => { e.stopPropagation(); stop(); });
+  bMirror.addEventListener("click", e => { e.stopPropagation(); const on = !stage.classList.contains("mirror"); stage.classList.toggle("mirror", on); bMirror.setAttribute("aria-pressed", on); showBar(); });
+  bText.addEventListener("click", e => { e.stopPropagation(); textMode = !textMode; bText.setAttribute("aria-pressed", textMode); showBar(); });
+  document.getElementById("bAlign").addEventListener("click", e => { e.stopPropagation(); alignUntil = performance.now() + 20000; showBar(); });
+  screen.addEventListener("click", showBar);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && running) stop(); });
+  window.addEventListener("resize", () => { if (running) size(); });
+})();
+</script>

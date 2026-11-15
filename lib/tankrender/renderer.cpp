@@ -27,7 +27,7 @@ void drawRays(const Tank& tk, Frame& f, int rowBegin = 0, int rowEnd = 1 << 30) 
   const float rr = (kScene.ray >> 16) & 255, rg = (kScene.ray >> 8) & 255, rb = kScene.ray & 255;
   const int yb = static_cast<int>(std::floor(kScreen.h * 0.88f)), y0 = static_cast<int>(kSurfaceY);
   for (const Ray& ray : tk.seabed().rays) {
-    const float sway = 7.f * std::sin(t * 0.21f + ray.phase);
+    const float sway = 3.f * std::sin(t * 0.21f + ray.phase);
     const float a = 0.11f * fx.rays * (0.6f + 0.4f * std::sin(t * 0.5f + ray.phase * 2.f));
     const float x0 = ray.x + sway;
     for (int y = std::max({y0, rowBegin, f.originY}), ye = std::min({yb, rowEnd, f.originY + f.h}); y < ye; ++y) {
@@ -71,7 +71,7 @@ void drawRocks(const Tank& tk, Sink& f) {
     }
     if (r.star >= 0 && peak) {
       const Hsl sc = rgbToHsl(kReefColors[r.star % kReefColorCount]);
-      f.blit('*', r.x + peak->x, baseY + peak->y - 6.f, 1.5f, hsl565(sc.h, sc.s * fx.vibrance, sc.l));
+      f.blit('*', r.x + peak->x, baseY + peak->y - 6.f, 1.f, hsl565(sc.h, sc.s * fx.vibrance, sc.l));
     }
   }
 }
@@ -173,7 +173,7 @@ void drawAmbient(const Tank& tk, Sink& f) {
     f.blit(p.ch, p.pos.x, p.pos.y, 1.f, hsl565(c.h, c.s * vib, c.l * (0.25f + 0.75f * k)));
   }
   const Hsl sc = rgbToHsl(kScene.surface);
-  constexpr int kSurfaceN = 53;  // x = 3, 9, ... 315
+  constexpr int kSurfaceN = static_cast<int>((kScreen.w - 3.f) / kCellW) + 1;  // x = 3, 9, ... (21 at 128 px)
   float ys[kSurfaceN];
   surfaceProfile(tk.ripples(), t, 3.f, kCellW, kSurfaceN, ys);
   const uint32_t tick = static_cast<uint32_t>(t * 3.f);  // glints re-roll 3× per second
@@ -238,7 +238,7 @@ void buildDisplayList(const Tank& tk, DisplayList& list, uint32_t flags) {
 
 void rasterize(const Tank& tk, const DisplayList& list, const uint16_t* background, Frame& f, uint32_t flags) {
   const int W = static_cast<int>(kScreen.w), H = static_cast<int>(kScreen.h);
-  if (f.w != W || f.originY < 0 || f.originY + f.h > H) return;  // bands of the 320-wide screen only
+  if (f.w != W || f.originY < 0 || f.originY + f.h > H) return;  // bands of the full-width screen only
   const size_t bytes = static_cast<size_t>(f.w) * f.h * sizeof(uint16_t);
   if (background) std::memcpy(f.px, background + static_cast<size_t>(f.originY) * W, bytes);
   else std::memset(f.px, 0, bytes);

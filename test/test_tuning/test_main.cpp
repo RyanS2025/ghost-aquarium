@@ -6,28 +6,29 @@ void setUp() {}
 void tearDown() {}
 
 // Pins the field-order contract with prototype/index.html's "Copy as C++" export.
-// These initializers are exactly what the prototype emits for the DESIGN §6 defaults.
+// These initializers are in the prototype's export format, with the 128×128 defaults (ADR 0010;
+// the prototype itself still opens with the 320×240 values, so re-scale before pasting).
 // If someone reorders a struct, pasted tuned values would land in the wrong fields;
 // these tests fail first.
 constexpr tank::Tuning kExported{
-    /* maxSpeed         */ {16.0f, 26.0f, 38.0f},
-    /* maxForce         */ 40.0f,
-    /* neighborRadius   */ 60.0f,
-    /* separationRadius */ 26.0f,
+    /* maxSpeed         */ {7.0f, 10.0f, 13.0f},
+    /* maxForce         */ 18.0f,
+    /* neighborRadius   */ 32.0f,
+    /* separationRadius */ 14.0f,
     /* cohesionWeight   */ 0.35f,
     /* alignmentWeight  */ 1.0f,
     /* separationWeight */ 2.2f,
     /* wanderWeight     */ 0.6f,
     /* wanderJitter     */ 1.6f,
-    /* edgeMargin       */ 36.0f,
+    /* edgeMargin       */ 18.0f,
     /* edgeWeight       */ 2.8f,
-    /* facingThreshold  */ 2.0f,
-    /* fishPerLayer     */ {5, 4, 3},
-    /* bubblesPerSec    */ 1.0f,
-    /* bubbleRise       */ 25.0f,
-    /* bubbleWobbleAmp  */ 2.0f,
+    /* facingThreshold  */ 1.0f,
+    /* fishPerLayer     */ {2, 2, 1},
+    /* bubblesPerSec    */ 0.5f,
+    /* bubbleRise       */ 14.0f,
+    /* bubbleWobbleAmp  */ 1.5f,
     /* bubbleWobbleHz   */ 1.2f,
-    /* seaweedSwayAmp   */ 7.0f,
+    /* seaweedSwayAmp   */ 3.5f,
     /* seaweedHz        */ {0.31f, 0.83f},
 };
 
@@ -41,7 +42,7 @@ constexpr tank::FxTuning kExportedFx{
     /* returnDelayMax */ 7.0f,
     /* maxAwayFrac    */ 0.35f,
     /* minSpeedFrac   */ 0.3f,
-    /* bodyWaveAmp    */ 0.8f,
+    /* bodyWaveAmp    */ 0.6f,
     /* bodyWaveHz     */ 1.4f,
     /* levelPull      */ 0.7f,
     /* depthPull      */ 0.8f,
@@ -53,7 +54,7 @@ constexpr tank::FxTuning kExportedFx{
     /* reef           */ 1,
     /* dartPerSec     */ 0.015f,
     /* leapPerSec     */ 0.08f,
-    /* splashDroplets */ 16,
+    /* splashDroplets */ 8,
 };
 
 void test_core_initializer_matches_defaults_field_by_field() {

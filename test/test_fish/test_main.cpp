@@ -40,10 +40,11 @@ void setUp() {}
 void tearDown() {}
 
 void test_body_length_and_advance_follow_font_scale() {
-  TEST_ASSERT_EQUAL_FLOAT(6.f, tank::charAdvance(Layer::Far));
-  TEST_ASSERT_EQUAL_FLOAT(9.f, tank::charAdvance(Layer::Mid));
-  TEST_ASSERT_EQUAL_FLOAT(12.f, tank::charAdvance(Layer::Near));
-  TEST_ASSERT_EQUAL_FLOAT(84.f, tank::bodyLength(Layer::Near));
+  for (int L = 0; L < tank::kLayerCount; ++L) {
+    const auto layer = static_cast<Layer>(L);
+    TEST_ASSERT_EQUAL_FLOAT(tank::kCellW * tank::kFontScale[L], tank::charAdvance(layer));
+    TEST_ASSERT_EQUAL_FLOAT(tank::kGlyphLen[L] * tank::charAdvance(layer), tank::bodyLength(layer));
+  }
 }
 
 void test_rigid_body_is_straight_row_behind_head() {
@@ -66,12 +67,12 @@ void test_rigid_body_squeezes_about_middle() {
 }
 
 void test_edges_zero_in_interior_and_sides_gated() {
-  Fish f = fishAt(Layer::Mid, {160, 120}, {20, 0});
+  Fish f = fishAt(Layer::Mid, {tank::kScreen.w / 2.f, tank::kScreen.h / 2.f}, {20, 0});
   Vec2 e = tank::steerEdges(f, kT);
   TEST_ASSERT_EQUAL_FLOAT(0.f, e.x);
   TEST_ASSERT_EQUAL_FLOAT(0.f, e.y);
 
-  f.pos = {5, 120};
+  f.pos = {5, tank::kScreen.h / 2.f};
   f.sideWalls = false;  // allowed to leave: no side wall
   TEST_ASSERT_EQUAL_FLOAT(0.f, tank::steerEdges(f, kT).x);
   f.sideWalls = true;
@@ -79,7 +80,7 @@ void test_edges_zero_in_interior_and_sides_gated() {
 }
 
 void test_edges_ignore_surface_while_leaping() {
-  Fish f = fishAt(Layer::Mid, {160, 30}, {20, 0});
+  Fish f = fishAt(Layer::Mid, {tank::kScreen.w / 2.f, tank::kSurfaceY + kT.edgeMargin / 2.f}, {20, 0});
   TEST_ASSERT_TRUE(tank::steerEdges(f, kT).y > 0.f);  // pushed down, away from the surface
   f.leapT = 1.f;
   TEST_ASSERT_EQUAL_FLOAT(0.f, tank::steerEdges(f, kT).y);

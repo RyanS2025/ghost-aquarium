@@ -60,7 +60,7 @@ void buildRock(Rng& rng, float x, float w, float h, Rock& out) {
 void buildSeabed(Rng& rng, Seabed& s) {
   enum Kind : uint8_t { kRock, kWeed, kCoralPiece };
   struct Piece { Kind kind; float half, w, h; };
-  constexpr float kRockSizes[kRocks][2] = {{60, 28}, {40, 20}, {24, 12}, {14, 7}};
+  constexpr float kRockSizes[kRocks][2] = {{30, 18}, {18, 11}};
   Piece bed[kRocks + kSeaweeds + kCorals];
   int n = 0;
   for (const auto& sz : kRockSizes) {
@@ -83,7 +83,7 @@ void buildSeabed(Rng& rng, Seabed& s) {
     if (b.kind == kRock) {
       buildRock(rng, x, b.w, b.h, s.rocks[ri++]);
     } else if (b.kind == kWeed) {
-      s.seaweed[wi++] = {x, rng.uniform(50.f, 105.f), rng.uniform(0.f, kTau), rng.uniform(0.f, 1.f)};
+      s.seaweed[wi++] = {x, rng.uniform(22.f, 46.f), rng.uniform(0.f, kTau), rng.uniform(0.f, 1.f)};
     } else {
       const auto tpl = static_cast<uint8_t>(randomIndex(rng, kCoralTemplates));
       const auto color = static_cast<uint8_t>(randomIndex(rng, kReefColorCount));
@@ -103,8 +103,8 @@ void buildSeabed(Rng& rng, Seabed& s) {
     s.sand[s.sandN++] = {sx, sy, ch, pebble};
   }
   for (int i = 0; i < kRays; ++i) {
-    const float x = kScreen.w * (0.15f + 0.7f * i / 3.f) + rng.uniform(-20.f, 20.f);
-    s.rays[i] = {x, rng.uniform(14.f, 30.f), rng.uniform(25.f, 55.f), rng.uniform(0.f, kTau)};
+    const float x = kScreen.w * (0.15f + 0.7f * i / (kRays - 1)) + rng.uniform(-8.f, 8.f);
+    s.rays[i] = {x, rng.uniform(6.f, 12.f), rng.uniform(10.f, 22.f), rng.uniform(0.f, kTau)};
   }
 }
 

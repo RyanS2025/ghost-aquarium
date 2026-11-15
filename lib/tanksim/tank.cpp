@@ -11,7 +11,6 @@ namespace tank {
 namespace {
 constexpr float kPi = 3.14159265358979f;
 constexpr float kTau = 2.f * kPi;
-constexpr float kLeapXMin = 70.f, kLeapXMax = 320.f - 70.f;
 
 float clampf(float x, float lo, float hi) { return std::min(hi, std::max(lo, x)); }
 float ms(const Tuning& t, const Fish& f) { return t.maxSpeed[static_cast<int>(f.layer)]; }
@@ -29,7 +28,7 @@ Tank::Tank(const Tuning& t, const FxTuning& fx, uint32_t seed) : t_(t), fx_(fx),
       Fish f{};
       f.layer = static_cast<Layer>(L);
       f.id = static_cast<uint8_t>(fishN_);
-      f.homeBase = kHomeMin + (slots[i] + 0.5f) / std::max(1, cnt) * (kHomeMax - kHomeMin) + rng_.uniform(-8.f, 8.f);
+      f.homeBase = kHomeMin + (slots[i] + 0.5f) / std::max(1, cnt) * (kHomeMax - kHomeMin) + rng_.uniform(-4.f, 4.f);
       const float a = rng_.uniform(-0.4f, 0.4f) + (rng_.uniform(0.f, 1.f) < 0.5f ? 0.f : kPi);
       const float sp = t_.maxSpeed[L] * 0.6f;
       f.palette = static_cast<uint8_t>(randomIndex(rng_, kPaletteCount));
@@ -72,8 +71,8 @@ void Tank::splash(float x, float strength, uint32_t rgb) {
   for (int i = 0; i < drops; ++i) {
     Particle p{};
     p.kind = ParticleKind::Drop;
-    p.pos = {x + rng_.uniform(-5.f, 5.f), kSurfaceY - 1.f};
-    p.vel = {rng_.uniform(-38.f, 38.f) * s, -rng_.uniform(35.f, 85.f) * s};
+    p.pos = {x + rng_.uniform(-3.f, 3.f), kSurfaceY - 1.f};
+    p.vel = {rng_.uniform(-18.f, 18.f) * s, -rng_.uniform(20.f, 45.f) * s};
     p.life = rng_.uniform(0.7f, 1.3f);
     p.maxLife = 1.3f;
     p.rgb = rng_.uniform(0.f, 1.f) < 0.35f ? rgb : kScene.bubble;
@@ -83,8 +82,8 @@ void Tank::splash(float x, float strength, uint32_t rgb) {
   for (int i = 0, n = static_cast<int>(std::lround(6.f * s)); i < n; ++i) {
     Particle p{};
     p.kind = ParticleKind::Spark;
-    p.pos = {x + rng_.uniform(-8.f, 8.f), kSurfaceY + rng_.uniform(-2.f, 2.f)};
-    p.vel = {rng_.uniform(-25.f, 25.f), rng_.uniform(-10.f, 10.f)};
+    p.pos = {x + rng_.uniform(-5.f, 5.f), kSurfaceY + rng_.uniform(-2.f, 2.f)};
+    p.vel = {rng_.uniform(-12.f, 12.f), rng_.uniform(-6.f, 6.f)};
     p.life = rng_.uniform(0.25f, 0.5f);
     p.maxLife = 0.5f;
     p.rgb = kWhite;
@@ -94,8 +93,8 @@ void Tank::splash(float x, float strength, uint32_t rgb) {
   for (int i = 0, n = static_cast<int>(std::lround(5.f * s)); i < n; ++i) {
     Particle p{};
     p.kind = ParticleKind::Bubble;
-    p.pos = {x + rng_.uniform(-6.f, 6.f), kSurfaceY + rng_.uniform(4.f, 14.f)};
-    p.vel = {rng_.uniform(-6.f, 6.f), rng_.uniform(5.f, 25.f)};
+    p.pos = {x + rng_.uniform(-4.f, 4.f), kSurfaceY + rng_.uniform(3.f, 8.f)};
+    p.vel = {rng_.uniform(-4.f, 4.f), rng_.uniform(3.f, 12.f)};
     p.life = rng_.uniform(0.8f, 1.6f);
     p.maxLife = 1.6f;
     p.rgb = kScene.bubble;
@@ -110,7 +109,7 @@ bool Tank::tryLeap() {
   for (int i = 0; i < fishN_; ++i) {
     const Fish& f = fish_[i];
     if (f.layer != Layer::Far && !f.away && !f.crossing && !f.airborne && f.leapT <= 0.f && f.turnP == 0.f &&
-        f.pos.y < kSurfaceY + 70.f && f.pos.x > kLeapXMin && f.pos.x < kLeapXMax &&
+        f.pos.y < kSurfaceY + kLeapMaxDepth && f.pos.x > kLeapXMin && f.pos.x < kLeapXMax &&
         (f.pos.x < kScreen.w / 2.f) == (f.vel.x > 0.f))
       cands[n++] = i;
   }
@@ -232,8 +231,8 @@ void Tank::step(float dt) {
       for (int k = 0; k < 7; ++k) {
         Particle p{};
         p.kind = ParticleKind::Bubble;
-        p.pos = {f.pos.x - u.x * 10.f, f.pos.y};
-        p.vel = {-u.x * rng_.uniform(10.f, 30.f), rng_.uniform(-12.f, 4.f)};
+        p.pos = {f.pos.x - u.x * 6.f, f.pos.y};
+        p.vel = {-u.x * rng_.uniform(6.f, 16.f), rng_.uniform(-7.f, 3.f)};
         p.life = rng_.uniform(0.8f, 1.6f);
         p.maxLife = 1.6f;
         p.rgb = kScene.bubble;
@@ -249,7 +248,7 @@ void Tank::step(float dt) {
   while (bubbleAcc_ >= 1.f) {
     bubbleAcc_ -= 1.f;
     if (bubbles_.count < BubblePool::kCapacity) {
-      const float x = rng_.uniform(8.f, kScreen.w - 8.f), phase = rng_.uniform(0.f, kTau);
+      const float x = rng_.uniform(6.f, kScreen.w - 6.f), phase = rng_.uniform(0.f, kTau);
       bubbles_.add({{x, kScreen.h + 2.f}, phase, t_.bubbleRise * rng_.uniform(0.8f, 1.2f)});
     }
   }
@@ -266,7 +265,7 @@ void Tank::step(float dt) {
     if (p.kind == ParticleKind::Drop) {
       p.vel.y += kGravity * dt;
     } else if (p.kind == ParticleKind::Bubble) {
-      p.vel.y -= 40.f * dt;
+      p.vel.y -= 22.f * dt;
       p.vel.x *= 1.f - 1.5f * dt;
     } else {
       p.vel = p.vel * (1.f - 2.5f * dt);

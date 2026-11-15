@@ -53,10 +53,10 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
-      - name: Build firmware (un-mirrored for the simulator)
+      - name: Build firmware for the simulator (ILI9341 panel, un-mirrored)
         run: pio run -e esp32s3
         env:
-          PLATFORMIO_BUILD_FLAGS: -DGHOST_MIRROR=0
+          PLATFORMIO_BUILD_FLAGS: -DGHOST_MIRROR=0 -DGHOST_PANEL_SIM=1
 
       # Only reports whether the secret exists; the token itself goes to the Wokwi step alone.
       - name: Check for a Wokwi token

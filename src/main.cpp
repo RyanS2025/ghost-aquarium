@@ -15,13 +15,14 @@
 
 #include "background.h"
 #include "display/lgfx_config.h"
+#include "drift.h"
 #include "renderer.h"
 #include "stepper.h"
 #include "tank.h"
 
 namespace {
-constexpr int kW = 320, kH = 240;
-constexpr size_t kFrameBytes = kW * kH * sizeof(uint16_t);
+constexpr int kW = tank::kScreenW, kH = tank::kScreenH;  // 128×128 (ADR 0010)
+constexpr size_t kFrameBytes = kW * kH * sizeof(uint16_t);   // 32 KB
 constexpr float kStep = 1.f / 60.f;
 constexpr uint32_t kMinFrameUs = 1000000 / 30;  // render at ≤ 30 fps (the SPI push limit)
 #ifndef GHOST_MIRROR
@@ -32,8 +33,10 @@ constexpr uint32_t kWatchdogSec = 5;
 #ifndef GHOST_BANDED
 #define GHOST_BANDED 1  // DMA bands (ADR 0008 §7); -DGHOST_BANDED=0 for the full-frame path
 #endif
-constexpr int kBandH = 40, kBands = kH / kBandH;
-constexpr size_t kBandBytes = kW * kBandH * sizeof(uint16_t);
+constexpr int kBandH = 32, kBands = kH / kBandH;
+static_assert(kH % kBandH == 0, "bands must tile the frame");
+constexpr size_t kBandBytes = kW * kBandH * sizeof(uint16_t);  // 8 KB
+constexpr uint32_t kDriftStepMs = 2 * 60 * 1000;  // burn-in drift: 1 px every 2 min (a 96-min cycle)
 char logBuf[192];  // stats lines are formatted here: Print::printf mallocs for lines > 64 chars
 
 void logLine(const char* fmt, ...) {
@@ -45,7 +48,7 @@ void logLine(const char* fmt, ...) {
 }
 
 LGFX lcd;
-uint16_t* bandBuf[2] = {nullptr, nullptr};  // 2 × 25 KB DMA-capable SRAM: draw one while DMA sends the other
+uint16_t* bandBuf[2] = {nullptr, nullptr};  // 2 × 8 KB DMA-capable SRAM: draw one while DMA sends the other
 uint16_t* frame = nullptr;       // full-frame fallback only (no band buffers)
 tank::render::DisplayList displayList;  // ~8 KB, global: built once per frame, rasterised per band
 uint16_t* background = nullptr;  // PSRAM; nullptr → render on black
@@ -54,6 +57,9 @@ int rayBand = 0;
 alignas(tank::Tank) uint8_t tankStorage[sizeof(tank::Tank)];  // no heap for the sim
 tank::Tank* tankPtr = nullptr;
 tank::FixedStepper stepper(kStep, 5);
+int homeX = 0, homeY = 0;  // panel position of the frame's top-left: 0,0 on the OLED, centred in the sim
+int driftX = 0, driftY = 0;
+uint32_t driftStep = UINT32_MAX;
 
 uint32_t lastUs = 0, lastFrameUs = 0, statsAtMs = 0;
 uint32_t frames = 0, renderUsSum = 0, pushUsSum = 0, glyphsMax = 0;
@@ -70,20 +76,42 @@ void startWatchdog() {
   if (err == ESP_OK) err = esp_task_wdt_add(nullptr);
   if (err != ESP_OK) logLine("WARN: task watchdog not active (err=0x%x)\n", static_cast<unsigned>(err));
 }
+
+// Burn-in protection (ADR 0010, DESIGN §3): every kDriftStepMs the whole image moves one pixel
+// along tank::render::driftOffset's path. The ≤ 2 px strips it uncovers are blacked out once,
+// on the move; off-panel parts of the push and the fills are clipped by LovyanGFX.
+void updateDrift() {
+  const uint32_t step = millis() / kDriftStepMs;
+  if (step == driftStep) return;
+  driftStep = step;
+  const auto o = tank::render::driftOffset(step);
+  driftX = homeX + o.dx;
+  driftY = homeY + o.dy;
+  constexpr int r = tank::render::kDriftRadius;
+  const int left = homeX - r, top = homeY - r, right = homeX + kW + r, bottom = homeY + kH + r;
+  auto black = [](int x, int y, int w, int h) { if (w > 0 && h > 0) lcd.fillRect(x, y, w, h, TFT_BLACK); };
+  black(left, top, right - left, driftY - top);                    // above
+  black(left, driftY + kH, right - left, bottom - (driftY + kH));  // below
+  black(left, driftY, driftX - left, kH);                          // left
+  black(driftX + kW, driftY, right - (driftX + kW), kH);           // right
+}
 }  // namespace
 
 void setup() {
   Serial.begin(115200);
   lcd.init();
-  // Landscape is rotation 1 (MADCTL MV|MX). Rotation 7 adds MY, which in landscape mirrors
-  // LEFT-RIGHT for free in the panel (ADR 0003). (Rotation 5 would flip top-to-bottom: verified
-  // against Panel_LCD::getMadCtl.) Confirm on the real reflector and mounting in Phase 1.
-  lcd.setRotation(kMirrored ? 7 : 1);
+  // Left-right mirroring is free in the panel (ADR 0003); the rotation pair per panel is in
+  // display/lgfx_config.h. Confirm on the real reflector and mounting in Phase 1.
+  lcd.setRotation(kMirrored ? kRotationMirrored : kRotationNormal);
   // The renderer writes native RGB565; a plain uint16_t* is read as byte-swapped unless this is
   // set (LGFXBase::create_pc). Without it every colour except black/white is garbled.
   lcd.setSwapBytes(true);
-  lcd.setBrightness(200);
+#if GHOST_PANEL_SIM
+  lcd.setBrightness(200);  // the ILI9341's backlight; the OLED has none
+#endif
   lcd.fillScreen(TFT_BLACK);
+  homeX = (lcd.width() - kW) / 2;  // 0 on the 128×128 OLED; the middle of the simulator's 320×240
+  homeY = (lcd.height() - kH) / 2;
 
   if (GHOST_BANDED) {
     for (auto& b : bandBuf) b = static_cast<uint16_t*>(heap_caps_malloc(kBandBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
@@ -136,8 +164,9 @@ void loop() {
       flags = tank::render::kBackdropHasRaysAndScenery;
     }
     uint32_t glyphs = 0;
+    updateDrift();
     if (bandBuf[0]) {
-      // Build once, then rasterise 6 bands of 40 rows: the CPU draws band k+1 while DMA sends band k.
+      // Build once, then rasterise 4 bands of 32 rows: the CPU draws band k+1 while DMA sends band k.
       displayList.clock = clockUs;
       tank::render::buildDisplayList(*tankPtr, displayList, flags);
       const uint32_t t1 = micros();
@@ -149,11 +178,11 @@ void loop() {
         tank::render::rasterize(*tankPtr, displayList, source, band, flags);
         tank::render::swapBytes(buf, kW * kBandH);  // panel byte order: DMA sends it as-is
         lcd.waitDMA();  // band b-1 done → the other buffer is free for band b+1
-        lcd.pushImageDMA(0, band.originY, kW, kBandH, reinterpret_cast<const lgfx::swap565_t*>(buf));
+        lcd.pushImageDMA(driftX, driftY + band.originY, kW, kBandH, reinterpret_cast<const lgfx::swap565_t*>(buf));
       }
       lcd.waitDMA();
       lcd.endWrite();
-      glyphs = static_cast<uint32_t>(displayList.n);  // ops per frame (bands would count each 6×)
+      glyphs = static_cast<uint32_t>(displayList.n);  // ops per frame (bands would count each 4×)
       const uint32_t t2 = micros();
       renderUsSum += t1 - t0;   // refresh + build (colour/animation math)
       pushUsSum += t2 - t1;     // rasterise + DMA, overlapped
@@ -163,7 +192,7 @@ void loop() {
       f.clock = clockUs;
       tank::render::renderFrame(*tankPtr, source, f, flags);
       const uint32_t t1 = micros();
-      lcd.pushImage(0, 0, kW, kH, frame);
+      lcd.pushImage(driftX, driftY, kW, kH, frame);
       const uint32_t t2 = micros();
       renderUsSum += t1 - t0;
       pushUsSum += t2 - t1;
