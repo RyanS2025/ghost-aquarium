@@ -93,6 +93,7 @@
       <legend>View</legend>
       <label class="check"><input type="checkbox" id="pixel"> Pixel-accurate (exact 320×240 grid)</label>
       <label class="check"><input type="checkbox" id="mirror"> Mirror (how it looks on the reflector)</label>
+      <label class="check"><input type="checkbox" id="ascii"> Classic ASCII fish</label>
       <div class="btns">
         <button id="leap">Make a fish leap</button>
         <button id="reseed">Reseed</button>
@@ -208,7 +209,16 @@ const CORAL = [                               // bottom-aligned ASCII templates
   { flex: false, rows: [" @@@ ", "@@@@@"] },                                 // brain coral
   { flex: false, rows: ["o    ", "| o  ", "| | o", "|_|_|"] },               // tube sponges
 ];
-const ROCK = [" __  ", "/  \\_", "/____\\"];
+// Real fish, drawn from shapes in fish-local coordinates (nose at origin, +x forward).
+const FISH_SHAPE = [            // per depth layer: body length, half-height, tail length, fin scale
+  { L: 13, H: 3.4, T: 5,  fin: 0.8 },
+  { L: 19, H: 5.6, T: 7,  fin: 1.0 },
+  { L: 27, H: 9.0, T: 10, fin: 1.25 },
+];
+const LOOKS = ["tetra", "betta", "goldfish", "clown", "spots", "stripes", "tang"];   // per palette index
+const ROCK_TONES = ["scene", "#4d6b86", "#7a4b3a"];   // scene rock color, blue-grey, warm red-brown
+let asciiStyle = false;
+const fishLen = (L) => (asciiStyle ? SPECIES[L].right.length * ADV[L] : FISH_SHAPE[L].L + FISH_SHAPE[L].T);
 
 // ================================================================ state
 const STORE_KEY = "ghost-aquarium-tuner-v4";
@@ -293,13 +303,41 @@ function makeTank(s) {
     const tpl = CORAL[rng.int(CORAL.length)];
     reef.push({ x: W * (0.05 + 0.9 * i / 6) + rng.uniform(-9, 9), rows: tpl.rows, flex: tpl.flex, glow: !!tpl.glow, color: REEF_COLORS[rng.int(REEF_COLORS.length)], phase: rng.uniform(0, TAU) });
   }
+  // rocks: a few big boulders and some smaller stones, spread so they don't stack
   const rocks = [];
-  for (let i = 0; i < 3; i++) rocks.push({ x: rng.uniform(30, W - 30), star: rng.uniform(0, 1) < 0.7, starColor: REEF_COLORS[rng.int(REEF_COLORS.length)] });
+  for (const [w0, h0] of [[64, 30], [46, 24], [34, 17], [26, 13], [18, 9], [14, 7]]) {
+    const w = w0 * rng.uniform(0.85, 1.15), h = h0 * rng.uniform(0.85, 1.2);
+    let x = 0;
+    for (let k = 0; k < 12; k++) { x = rng.uniform(w / 2 + 2, W - w / 2 - 2); if (rocks.every((r) => Math.abs(r.x - x) > (r.w + w) * 0.42)) break; }
+    rocks.push(makeRock(rng, x, w, h));
+  }
+  rocks[0].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
+  if (rng.uniform(0, 1) < 0.6) rocks[1].star = REEF_COLORS[rng.int(REEF_COLORS.length)];
+  rocks.sort((a, b) => b.h - a.h);             // big ones at the back
   const sand = [];
   for (let x = 2; x < W; x += 4) sand.push({ x: x + rng.uniform(-1, 1), y: H - 2 - rng.uniform(0, 3), ch: [",", ".", "`", "."][rng.int(4)], pebble: rng.uniform(0, 1) < 0.08 ? REEF_COLORS[rng.int(REEF_COLORS.length)] : null });
   const rays = [];
   for (let i = 0; i < 4; i++) rays.push({ x: W * (0.15 + 0.7 * i / 3) + rng.uniform(-20, 20), w: rng.uniform(14, 30), slant: rng.uniform(25, 55), phase: rng.uniform(0, TAU) });
   return { rng, fish, seaweed, plankton, reef, rocks, sand, rays, bubbles: [], particles: [], ripples: [], time: 0, bubbleAcc: 0 };
+}
+
+// An irregular boulder: a jittered half-ellipse sitting on the sand (local y is up-negative).
+function makeRock(rng, x, w, h) {
+  const n = 11, pts = [];
+  for (let k = 0; k <= n; k++) {
+    const a = Math.PI + Math.PI * k / n, j = k === 0 || k === n ? 1 : rng.uniform(0.8, 1.08);
+    pts.push(v(Math.cos(a) * w / 2 * j, Math.min(0, Math.sin(a) * h * j)));
+  }
+  const moss = [], specks = [];
+  for (let k = 2; k < n - 1; k++) if (pts[k].y < -h * 0.6 && rng.uniform(0, 1) < 0.4) moss.push({ x: pts[k].x, y: pts[k].y + 1.2, r: rng.uniform(1.5, 3) });
+  for (let k = 0; k < 6; k++) specks.push({ x: rng.uniform(-w * 0.3, w * 0.3), y: rng.uniform(-h * 0.65, -h * 0.12), r: rng.uniform(0.4, 0.9) });
+  return { x, w, h, pts, moss, specks, star: null, tone: ROCK_TONES[rng.int(ROCK_TONES.length)], lMul: rng.uniform(0.85, 1.2), hueShift: rng.uniform(-12, 12), starRot: rng.uniform(0, TAU) };
+}
+
+// Body sample points used for spacing between fish (matches the drawn length).
+function bodyPoints(f) {
+  const L = f.layer;
+  return asciiStyle ? rigidBody(f, SPECIES[L].right.length, ADV[L]) : rigidBody(f, 5, fishLen(L) / 4);
 }
 
 function steerEdges(f) {
@@ -443,7 +481,7 @@ function tryAutoLeap(tk) {
 // A fish that swam out of view comes back from a random side, at the entry depth with the
 // most open water, sometimes in a new color (reads as a different fish).
 function reenter(tk, f) {
-  const rng = tk.rng, L = f.layer, bodyLen = SPECIES[L].right.length * ADV[L];
+  const rng = tk.rng, L = f.layer, bodyLen = fishLen(L);
   const fromLeft = rng.uniform(0, 1) < 0.5, edgeX = fromLeft ? 0 : W;
   let bestY = HOME_MIN, bestD = -1;
   for (let k = 0; k < 6; k++) {
@@ -460,7 +498,7 @@ function reenter(tk, f) {
     away: false, crossing: true, leaving: false,
   });
   if (rng.uniform(0, 1) < 0.5) f.pal = rng.int(palettes.length);
-  f.body = rigidBody(f, SPECIES[L].right.length, ADV[L]);
+  f.body = bodyPoints(f);
 }
 
 // ---------------------------------------------------------------- step
@@ -585,11 +623,11 @@ function step(tk, dt) {
     const tiltMax = (f.airborne || f.leapT > 0 ? 35 : T.maxTilt) * Math.PI / 180;
     const tiltTarget = clamp(Math.atan2(f.vel.y, Math.abs(f.vel.x) + 1e-6) * 0.8, -tiltMax, tiltMax);
     f.tilt = (f.tilt || 0) + (tiltTarget - (f.tilt || 0)) * Math.min(1, dt * 4);
-    f.body = rigidBody(f, n, ADV[f.layer]);
+    f.body = bodyPoints(f);
 
     // crossing a side edge: leaving fish are "away" once the whole body is out of view;
     // entering fish ignore side walls until they're fully inside
-    const bodyLen = n * ADV[f.layer];
+    const bodyLen = fishLen(f.layer);
     if (!f.crossing && !f.airborne && (f.pos.x < 0 || f.pos.x > W)) { f.crossing = true; f.leaving = true; }
     if (f.crossing && f.pos.x > bodyLen && f.pos.x < W - bodyLen) { f.crossing = false; f.leaving = false; }
     if (f.crossing && (f.pos.x < -bodyLen - 4 || f.pos.x > W + bodyLen + 4)) {
@@ -716,16 +754,6 @@ function drawReef(tk) {
   if (!T.reef) return;
   const t = tk.time;
   ctx.font = "bold 8px monospace";
-  // rocks
-  const [rh, rs, rl] = sceneHsl.rock;
-  for (const rk of tk.rocks) {
-    ROCK.forEach((row, r) => [...row].forEach((ch, c) => {
-      if (ch === " ") return;
-      ctx.fillStyle = hsl(rh, rs, rl * (0.7 + 0.3 * r / 2));
-      ctx.fillText(ch, P(rk.x + (c - row.length / 2) * 5), P(H - 5 - (ROCK.length - 1 - r) * 7));
-    }));
-    if (rk.star) { const [sh, ss, sl] = hexToHsl(rk.starColor); ctx.fillStyle = hsl(sh, ss * T.vibrance, sl); ctx.fillText("*", P(rk.x + 1), P(H - 5 - ROCK.length * 7 + 2)); }
-  }
   // corals: dark at the base, bright at the tips; flexible ones sway
   for (const c of tk.reef) {
     const [h, s, l] = hexToHsl(c.color), rows = c.rows.length;
@@ -749,6 +777,172 @@ function drawReef(tk) {
   }
 }
 
+// ---------------------------------------------------------------- rocks
+const hslMemo = new Map();
+const hslOf = (hex) => { let c = hslMemo.get(hex); if (!c) { c = hexToHsl(hex); hslMemo.set(hex, c); } return c; };
+
+function drawStar(x, y, R, color, rot) {
+  const [h, s, l] = hslOf(color);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) { const r = k % 2 ? R * 0.42 : R, a = -Math.PI / 2 + k * Math.PI / 5; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  ctx.closePath();
+  ctx.fillStyle = hsl(h, s * T.vibrance, l); ctx.fill();
+  ctx.strokeStyle = hsl(h, s, l * 0.5); ctx.lineWidth = 0.4; ctx.stroke();
+  ctx.fillStyle = hsl(h, s * 0.6, Math.min(0.9, l * 1.4));
+  for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * TAU / 5; ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5, 0.35, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+
+// Boulders: lit from the surface (upper-left highlight), dark at the base, with speckles,
+// moss on top and the odd starfish.
+function drawRocks(tk) {
+  const baseY = H - 3;
+  for (const r of tk.rocks) {
+    const [h0, s0, l0] = hslOf(r.tone === "scene" ? scene.rock : r.tone);
+    const h = (h0 + r.hueShift + 360) % 360, s = s0 * T.vibrance * 0.85, l = l0 * r.lMul, p = r.pts;
+    ctx.save(); ctx.translate(r.x, baseY);
+    const path = new Path2D();
+    path.moveTo(p[0].x, 0);
+    for (let k = 0; k < p.length - 1; k++) path.quadraticCurveTo(p[k].x, p[k].y, (p[k].x + p[k + 1].x) / 2, (p[k].y + p[k + 1].y) / 2);
+    path.lineTo(p[p.length - 1].x, 0); path.closePath();
+    const g = ctx.createLinearGradient(-r.w * 0.3, -r.h, r.w * 0.2, 0);
+    g.addColorStop(0, hsl(h, s, l * 1.45)); g.addColorStop(0.55, hsl(h, s, l * 0.9)); g.addColorStop(1, hsl(h, s * 0.9, l * 0.4));
+    ctx.fillStyle = g; ctx.fill(path);
+    ctx.save(); ctx.clip(path);
+    const rg = ctx.createRadialGradient(-r.w * 0.18, -r.h * 0.85, 0, -r.w * 0.18, -r.h * 0.85, r.w * 0.45);
+    rg.addColorStop(0, hsl(h, s * 0.7, Math.min(0.8, l * 1.9), 0.35)); rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg; ctx.fillRect(-r.w / 2, -r.h * 1.2, r.w, r.h * 1.2);
+    ctx.fillStyle = hsl(h, s, l * 0.55, 0.8);
+    for (const sp of r.specks) { ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, TAU); ctx.fill(); }
+    ctx.restore();
+    ctx.strokeStyle = hsl(h, s, l * 0.35, 0.9); ctx.lineWidth = 0.6; ctx.stroke(path);
+    const [mh, ms, ml] = sceneHsl.seaweedTip;
+    ctx.fillStyle = hsl(mh, ms * T.vibrance * 0.8, ml * 0.5);
+    for (const m of r.moss) { ctx.beginPath(); ctx.ellipse(m.x, m.y, m.r * 1.4, m.r * 0.7, 0, 0, TAU); ctx.fill(); }
+    if (r.star) { const top = p.reduce((a, b) => (b.y < a.y ? b : a)); drawStar(top.x * 0.6, top.y + 2, Math.max(3, r.h * 0.16), r.star, r.starRot); }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------- real fish
+// Color for a fish part, graded for depth (far = darker, less saturated, bluer).
+function dcol(hex, L, lMul = 1, alpha = 1) {
+  const [h, s, l] = hslOf(hex), d = DEPTH[L];
+  return hsl(lerpHue(h, 215, d.blue), s * d.s * T.vibrance, l * d.l * lMul, alpha);
+}
+
+// Drawn in fish-local space: nose at (0,0), body toward -x. Placement is
+// translate → scale(facing × flip-squeeze) → rotate(tilt), so a flip-turn reads as the
+// fish rotating toward you and a tilt pitches the nose up or down.
+function drawRealFish(f, t, squeeze) {
+  const L = f.layer, S = FISH_SHAPE[L], look = LOOKS[f.pal % LOOKS.length];
+  const [cHead, cTail] = palettes[f.pal % palettes.length];
+  const len = S.L, hh = S.H, d = DEPTH[L];
+  const longFins = look === "betta", tallFins = L === 2 && (look === "tang" || look === "stripes" || look === "spots");
+  const tailLen = S.T * (longFins ? 1.9 : look === "goldfish" ? 1.4 : 1);
+  const wag = Math.sin(f.wavePhase) * (longFins ? 0.42 : 0.32);
+  const bend = hh * 0.22 * Math.sin(f.wavePhase - 1.1);       // rear of the body sways with the tail
+  ctx.save();
+  ctx.translate(P(f.pos.x), P(f.pos.y));
+  ctx.scale((f.facingRight ? 1 : -1) * squeeze, 1);
+  ctx.rotate(f.tilt);
+  ctx.lineJoin = "round";
+
+  // tail, wagging about the base of the tail
+  ctx.save();
+  ctx.translate(-len * 0.9, bend); ctx.rotate(wag);
+  ctx.beginPath();
+  const spread = longFins ? 1.5 : 1;
+  if (look === "goldfish") {                 // fancy double-lobed tail
+    ctx.moveTo(0, -hh * 0.3);
+    ctx.quadraticCurveTo(-tailLen * 0.6, -hh * 1.5, -tailLen, -hh * 1.2);
+    ctx.quadraticCurveTo(-tailLen * 0.55, -hh * 0.2, -tailLen * 0.9, 0);
+    ctx.quadraticCurveTo(-tailLen * 0.55, hh * 0.2, -tailLen, hh * 1.2);
+    ctx.quadraticCurveTo(-tailLen * 0.6, hh * 1.5, 0, hh * 0.3);
+  } else {                                   // forked tail (long and flowing for the betta)
+    ctx.moveTo(0, -hh * 0.28);
+    ctx.quadraticCurveTo(-tailLen * 0.55, -hh * 0.5 * spread, -tailLen, -hh * spread);
+    ctx.quadraticCurveTo(-tailLen * (longFins ? 0.75 : 0.62), 0, -tailLen, hh * spread);
+    ctx.quadraticCurveTo(-tailLen * 0.55, hh * 0.5 * spread, 0, hh * 0.28);
+  }
+  ctx.closePath();
+  const tg = ctx.createLinearGradient(0, 0, -tailLen, 0);
+  tg.addColorStop(0, dcol(cTail, L, 0.9)); tg.addColorStop(1, dcol(cTail, L, 1.15, longFins ? 0.75 : 0.92));
+  ctx.fillStyle = tg; ctx.fill();
+  if (L > 0) {                               // fin rays
+    ctx.strokeStyle = dcol(cTail, L, 0.6, 0.45); ctx.lineWidth = 0.35;
+    for (const k of [-0.6, -0.2, 0.2, 0.6]) { ctx.beginPath(); ctx.moveTo(-1, k * hh * 0.3); ctx.lineTo(-tailLen * 0.9, k * hh * spread); ctx.stroke(); }
+  }
+  ctx.restore();
+
+  // dorsal (top) and anal (bottom) fins, behind the body
+  const fs = S.fin * (tallFins ? 1.7 : 1) * (longFins ? 1.5 : 1);
+  ctx.fillStyle = dcol(cTail, L, 0.95, 0.85);
+  ctx.beginPath();
+  ctx.moveTo(-len * 0.28, -hh * 0.9);
+  ctx.quadraticCurveTo(-len * 0.45, -hh * (1 + 0.75 * fs), -len * 0.78, -hh * (0.9 + 0.55 * fs) + bend * 0.5);
+  ctx.quadraticCurveTo(-len * 0.66, -hh * 0.75, -len * 0.74, -hh * 0.62 + bend * 0.6);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-len * 0.5, hh * 0.85);
+  ctx.quadraticCurveTo(-len * 0.62, hh * (1 + 0.5 * fs), -len * 0.8, hh * (0.75 + 0.4 * fs) + bend * 0.5);
+  ctx.quadraticCurveTo(-len * 0.72, hh * 0.7, -len * 0.78, hh * 0.55 + bend * 0.6);
+  ctx.closePath(); ctx.fill();
+
+  // body: rounded snout, tapering to the tail; color runs head → tail
+  const body = new Path2D();
+  body.moveTo(0, 0);
+  body.bezierCurveTo(-len * 0.02, -hh * 0.78, -len * 0.42, -hh * 1.12, -len * 0.92, -hh * 0.3 + bend);
+  body.lineTo(-len * 0.92, hh * 0.3 + bend);
+  body.bezierCurveTo(-len * 0.42, hh * 1.05, -len * 0.02, hh * 0.75, 0, 0);
+  body.closePath();
+  const base = look === "tetra" ? ["#34507a", "#3b2f52"] : [cHead, cTail];
+  const bg = ctx.createLinearGradient(0, 0, -len, 0);
+  bg.addColorStop(0, dcol(base[0], L)); bg.addColorStop(1, dcol(base[1], L));
+  ctx.fillStyle = bg; ctx.fill(body);
+
+  ctx.save(); ctx.clip(body);
+  const blob = (x, y, rx, ry, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.fill(); };
+  if (look === "tetra") {                    // glowing blue-green stripe over a red rear belly
+    blob(-len * 0.62, hh * 0.38, len * 0.32, hh * 0.42, dcol(cTail, L));
+    blob(-len * 0.5, -hh * 0.12, len * 0.38, hh * 0.18, dcol(cHead, L, 1.25));
+  } else if (look === "clown") {             // white bands with dark edges
+    for (const bx of [0.2, 0.5, 0.8]) { blob(-len * bx, 0, len * 0.075, hh * 1.4, dcol("#1a1010", L, 1, 0.9)); blob(-len * bx, 0, len * 0.05, hh * 1.4, dcol(cTail, L, 1.05)); }
+  } else if (look === "spots") {             // dark spots
+    for (let k = 0; k < 6; k++) blob(-len * (0.3 + 0.1 * k), hh * 0.45 * Math.sin(k * 2.3 + f.id), Math.max(0.5, hh * 0.13), Math.max(0.5, hh * 0.13), dcol(cTail, L, 0.45, 0.85));
+  } else if (look === "stripes") {           // thin vertical stripes
+    for (const bx of [0.32, 0.46, 0.6, 0.74]) blob(-len * bx, 0, len * 0.025, hh * 1.3, dcol(cTail, L, 0.55, 0.75));
+  } else if (look === "tang") {              // dark swoosh along the flank
+    ctx.strokeStyle = dcol("#101a40", L, 1, 0.85); ctx.lineWidth = hh * 0.28;
+    ctx.beginPath(); ctx.moveTo(-len * 0.2, -hh * 0.35); ctx.quadraticCurveTo(-len * 0.55, hh * 0.35, -len * 0.92, -hh * 0.1); ctx.stroke();
+  } else {                                   // betta, goldfish: soft sheen along the back
+    blob(-len * 0.45, -hh * 0.45, len * 0.35, hh * 0.25, dcol(cHead, L, 1.3, 0.45));
+  }
+  const sh = ctx.createLinearGradient(0, -hh, 0, hh);   // light from above: darker back, paler belly
+  sh.addColorStop(0, "rgba(0,0,0,0.35)"); sh.addColorStop(0.45, "rgba(0,0,0,0)");
+  sh.addColorStop(0.75, `rgba(255,255,255,${(0.12 * d.l).toFixed(3)})`); sh.addColorStop(1, `rgba(255,255,255,${(0.22 * d.l).toFixed(3)})`);
+  ctx.fillStyle = sh; ctx.fillRect(-len - 2, -hh * 1.3, len + 4, hh * 2.6);
+  ctx.restore();
+  ctx.strokeStyle = dcol(base[1], L, 0.45, 0.8); ctx.lineWidth = L === 0 ? 0.35 : 0.5; ctx.stroke(body);
+
+  if (L > 0) {
+    ctx.strokeStyle = dcol(base[1], L, 0.4, 0.35); ctx.lineWidth = 0.4;          // gill line
+    ctx.beginPath(); ctx.arc(-len * 0.3, 0, hh * 0.6, -0.9, 0.9); ctx.stroke();
+    ctx.save();                                                                 // pectoral fin, flapping
+    ctx.translate(-len * 0.33, hh * 0.35); ctx.rotate(0.5 + 0.35 * Math.sin(t * 7 + f.id));
+    ctx.fillStyle = dcol(cTail, L, 1.1, 0.7);
+    ctx.beginPath(); ctx.ellipse(-hh * 0.45, 0, hh * 0.5, hh * 0.2, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  // eye: white, pupil, highlight (just a dark dot on the small far fish)
+  const er = Math.max(0.7, hh * 0.24), ex = -len * 0.17, ey = -hh * 0.2;
+  const dot = (x, y, r, c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); };
+  if (L === 0) dot(ex, ey, er * 0.9, "rgba(0,0,0,0.85)");
+  else { dot(ex, ey, er, dcol("#f4f8ff", L)); dot(ex + er * 0.15, ey, er * 0.6, "#05070a"); dot(ex + er * 0.35, ey - er * 0.3, er * 0.22, "rgba(255,255,255,0.9)"); }
+  ctx.restore();
+}
+
 function draw(tk) {
   const t = tk.time;
   ctx.imageSmoothingEnabled = true;
@@ -763,6 +957,8 @@ function draw(tk) {
     ctx.fillStyle = hsl(h, s * T.vibrance, l * (0.25 + 0.55 * tw * tw));
     ctx.fillText(".", P(p.pos.x), P(p.pos.y));
   }
+
+  drawRocks(tk);
 
   // seaweed: each stalk tinted between green and teal; dark root, bright tip
   ctx.font = "bold 8px monospace";
@@ -781,6 +977,13 @@ function draw(tk) {
 
   // fish, far → near
   for (let L = 0; L < 3; L++) {
+    if (!asciiStyle) {
+      for (const f of tk.fish) {
+        if (f.layer !== L || f.away) continue;
+        drawRealFish(f, t, f.turnP > 0 ? Math.max(0.12, Math.abs(1 - 2 * f.turnP)) : 1);
+      }
+      continue;
+    }
     const fp = FONT_PX[L], adv = ADV[L];
     ctx.font = `bold ${fp}px monospace`;
     for (const f of tk.fish) {
@@ -927,6 +1130,7 @@ buildControls(); refreshExport();
 
 $("pixel").addEventListener("change", (e) => setResolution(e.target.checked));
 $("mirror").addEventListener("change", (e) => canvas.classList.toggle("mirror", e.target.checked));
+$("ascii").addEventListener("change", (e) => { asciiStyle = e.target.checked; for (const f of tank.fish) f.body = bodyPoints(f); });
 $("leap").addEventListener("click", () => tryAutoLeap(tank));
 $("reseed").addEventListener("click", () => { seed = (Math.random() * 0xFFFFFFFF) >>> 0; tank = makeTank(seed); refreshExport(); save(); });
 $("reset").addEventListener("click", () => {
