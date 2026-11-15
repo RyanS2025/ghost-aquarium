@@ -6,9 +6,9 @@
 
 ---
 
-![The firmware running on a simulated ESP32-S3 + ILI9341 in Wokwi](docs/media/wokwi-firmware.png)
+![Ghost Aquarium demo: ASCII fish, coral and light rays](docs/media/demo.gif)
 
-*The real firmware running on a simulated ESP32-S3 + ILI9341 (Wokwi), shown un-mirrored. On the device the panel mirrors it for the reflector.*
+*Rendered by the firmware's own C++ renderer, frame for frame what the ESP32 draws (`make gif`). Shown un-mirrored; on the device the panel mirrors it for the reflector.*
 
 ## How it works
 
@@ -23,6 +23,12 @@
 ```
 
 Light from the screen reflects off the angled sheet toward your eye. Black pixels reflect nothing, so only the fish are visible and they seem to hang in the air. The reflection is mirrored left to right, and the display controller flips it back in hardware at no CPU cost.
+
+### Runs on the real firmware
+
+The actual firmware booted on a simulated ESP32-S3 + ILI9341 in [Wokwi](https://wokwi.com) (`make sim`):
+
+![The firmware running on a simulated ESP32-S3 + ILI9341 in Wokwi](docs/media/wokwi-firmware.png)
 
 ## Engineering highlights
 
@@ -59,6 +65,7 @@ Every workflow is one command (`make help` lists them). They're also VS Code tas
 | Command | What it does |
 |---|---|
 | `make setup` | Installs PlatformIO and checks the Wokwi simulator setup |
+| `make gif` | Renders the README demo GIF with the firmware renderer |
 | `make check` | Laptop tests, firmware build and a rendered snapshot frame: everything that needs no hardware |
 | `make prototype` | Opens the browser tuner (device-accurate preview, sliders, "Copy as C++") |
 | `make sim` | Boots the real firmware in Wokwi headlessly and checks it reports frame stats (needs a free `WOKWI_CLI_TOKEN`) |

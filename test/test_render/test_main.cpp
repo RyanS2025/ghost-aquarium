@@ -207,8 +207,40 @@ void test_bake_static_scenery_only_touches_the_seabed() {
   TEST_ASSERT_TRUE(changed > 200);  // rocks and sand were drawn
 }
 
+// Demo frames for the README GIF, through the exact firmware path (baked scenery + one ray band
+// per frame). Opt-in: GHOST_FRAMES=<dir> pio test -e native -f test_render  (see `make gif`).
+void test_render_demo_frames() {
+  const char* dir = std::getenv("GHOST_FRAMES");
+  if (!dir) TEST_IGNORE_MESSAGE("set GHOST_FRAMES=<dir> to write demo frames");
+  auto bg = background();
+  tank::Tank tk(kT, kFx, 42);
+  for (int i = 0; i < 60 * 4; ++i) tk.step(1.f / 60.f);
+  tank::render::bakeStaticScenery(tk, bg.data());
+  std::vector<uint16_t> backdrop(W * H), px(W * H);
+  for (int b = 0; b < tank::render::kRayBands; ++b) tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), b);
+  constexpr int kFrames = 200, kStepsPerFrame = 3;  // 20 fps GIF, real-time motion
+  for (int n = 0; n < kFrames; ++n) {
+    for (int s = 0; s < kStepsPerFrame; ++s) tk.step(1.f / 60.f);
+    if (n % 40 == 10) tk.tryLeap();  // show off a leap + splash when a fish is in position
+    tank::render::refreshBackdrop(tk, bg.data(), backdrop.data(), n % tank::render::kRayBands);
+    Frame f{px.data(), W, H};
+    tank::render::renderFrame(tk, backdrop.data(), f, tank::render::kBackdropHasRaysAndScenery);
+    char path[512];
+    std::snprintf(path, sizeof(path), "%s/frame_%03d.ppm", dir, n);
+    FILE* out = std::fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(out);
+    std::fprintf(out, "P6\n%d %d\n255\n", W, H);
+    for (uint16_t c : px) {
+      const uint8_t r = ((c >> 11) & 31) << 3, g = ((c >> 5) & 63) << 2, b = (c & 31) << 3;
+      std::fputc(r | (r >> 5), out); std::fputc(g | (g >> 6), out); std::fputc(b | (b >> 5), out);
+    }
+    std::fclose(out);
+  }
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_render_demo_frames);
   RUN_TEST(test_baked_backdrop_matches_live_render_above_seabed);
   RUN_TEST(test_refresh_backdrop_touches_only_its_band);
   RUN_TEST(test_bake_static_scenery_only_touches_the_seabed);

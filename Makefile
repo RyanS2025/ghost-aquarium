@@ -7,7 +7,7 @@ OUT := .pio/out
 PORT ?= 8765
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test test-ready build build-sim sim snapshot prototype flash monitor check clean
+.PHONY: help setup test test-ready build build-sim sim snapshot gif prototype flash monitor check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
@@ -52,6 +52,14 @@ snapshot: ## Render one frame with the C++ renderer → .pio/out/frame.png (and 
 	  convert $(OUT)/frame.ppm $(OUT)/frame.png
 	@echo "frame: $(OUT)/frame.png"
 	@open $(OUT)/frame.png 2>/dev/null || xdg-open $(OUT)/frame.png 2>/dev/null || true
+
+gif: ## Render the README demo GIF with the firmware's renderer → docs/media/demo.gif (needs ffmpeg)
+	@rm -rf $(OUT)/frames && mkdir -p $(OUT)/frames
+	GHOST_FRAMES=$(CURDIR)/$(OUT)/frames $(PIO) test -e native -f test_render
+	ffmpeg -loglevel error -y -framerate 20 -i $(OUT)/frames/frame_%03d.ppm \
+	  -vf "scale=640:480:flags=neighbor,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
+	  -loop 0 docs/media/demo.gif
+	@ls -lh docs/media/demo.gif
 
 prototype: ## Serve the browser tuner on http://127.0.0.1:8765 and open it (Ctrl+C to stop)
 	@(sleep 1; open http://127.0.0.1:$(PORT)/index.html 2>/dev/null || xdg-open http://127.0.0.1:$(PORT)/index.html) &
