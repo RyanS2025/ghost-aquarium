@@ -29,7 +29,7 @@ void tearDown() {}
 
 void test_tank_spawns_per_layer_counts_and_stratified_depths() {
   Tank tk(kT, kFx, 42);
-  TEST_ASSERT_EQUAL_INT(12, tk.fishCount());
+  TEST_ASSERT_EQUAL_INT(kT.fishPerLayer[0] + kT.fishPerLayer[1] + kT.fishPerLayer[2], tk.fishCount());
   for (int L = 0; L < tank::kLayerCount; ++L) {
     std::vector<float> homes;
     for (int i = 0; i < tk.fishCount(); ++i)
@@ -37,7 +37,7 @@ void test_tank_spawns_per_layer_counts_and_stratified_depths() {
     TEST_ASSERT_EQUAL_INT(kT.fishPerLayer[L], static_cast<int>(homes.size()));
     std::sort(homes.begin(), homes.end());
     const float band = (tank::kHomeMax - tank::kHomeMin) / homes.size();
-    for (size_t k = 1; k < homes.size(); ++k) TEST_ASSERT_TRUE(homes[k] - homes[k - 1] >= band - 16.1f);
+    for (size_t k = 1; k < homes.size(); ++k) TEST_ASSERT_TRUE(homes[k] - homes[k - 1] >= band - 8.1f);  // ±4 px jitter each
   }
 }
 
@@ -108,7 +108,7 @@ void test_leap_goes_airborne_and_splashes() {
 // Review Focus #5
 void test_pools_drop_when_full() {
   Tank tk(kT, kFx, 42);
-  for (int i = 0; i < 20; ++i) tk.splash(160.f, 200.f, tank::kWhite);
+  for (int i = 0; i < 20; ++i) tk.splash(tank::kScreen.w / 2.f, 200.f, tank::kWhite);
   TEST_ASSERT_EQUAL_INT(tank::kMaxParticles, tk.particles().count);
   TEST_ASSERT_TRUE(tk.ripples().count <= tank::kMaxRipples);
   for (int i = 0; i < 600; ++i) tk.step(kDt);  // and they drain normally
@@ -140,7 +140,7 @@ void test_soak_100k_steps_finite_bounded_and_populated() {
       const auto& f = tk.fish()[k];
       TEST_ASSERT_TRUE(std::isfinite(f.pos.x) && std::isfinite(f.pos.y));
       TEST_ASSERT_TRUE(std::isfinite(f.vel.x) && std::isfinite(f.vel.y));
-      if (!f.away) TEST_ASSERT_TRUE(f.pos.y >= -60.f && f.pos.y <= 240.f);
+      if (!f.away) TEST_ASSERT_TRUE(f.pos.y >= -60.f && f.pos.y <= tank::kScreen.h);
       if (f.away && awaySince[k] < 0.f) awaySince[k] = static_cast<float>(tk.time());
       if (!f.away) awaySince[k] = -1.f;
       if (f.away) TEST_ASSERT_TRUE(tk.time() - awaySince[k] <= kFx.returnDelayMax + 0.1f);
@@ -164,7 +164,7 @@ void test_clock_keeps_running_after_six_days() {
 void test_ripples_expire_after_six_days() {
   Tank tk(kT, kFx, 42);
   tk.setClockForTest(6.0 * 86400.0);
-  tk.splash(160.f, 120.f, tank::kWhite);
+  tk.splash(tank::kScreen.w / 2.f, 120.f, tank::kWhite);
   for (int i = 0; i < 60 * 4; ++i) tk.step(kDt);
   for (const auto& r : tk.ripples()) TEST_ASSERT_TRUE(r.age < 3.5f);
   TEST_ASSERT_TRUE(tk.ripples().count < tank::kMaxRipples);

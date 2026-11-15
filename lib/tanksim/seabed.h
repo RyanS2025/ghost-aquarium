@@ -8,8 +8,9 @@
 
 namespace tank {
 
-constexpr int kRocks = 4, kSeaweeds = 4, kCorals = 3, kRays = 4;
-constexpr int kMaxRockCells = 64, kMaxSand = 56;
+// Sized for the 128-px-wide tank (ADR 0010): two rocks, three weeds, one coral leave clear gaps.
+constexpr int kRocks = 2, kSeaweeds = 3, kCorals = 1, kRays = 3;
+constexpr int kMaxRockCells = 32, kMaxSand = 24;
 
 struct RockCell {
   float x, y;  // relative to the rock's base centre; y is up-negative

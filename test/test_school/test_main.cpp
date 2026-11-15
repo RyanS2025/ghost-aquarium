@@ -47,10 +47,12 @@ void test_school_ignores_away_and_airborne() {
   TEST_ASSERT_EQUAL_FLOAT(0.f, r.x);
 }
 
-// Neighbour's head is 78 px away (outside separation AND neighbour range) but its TAIL is
+// Neighbour's head is ~42 px away (outside separation AND neighbour range) but its TAIL is
 // ~8.5 px away, down-right of us. Only a body-aware rule notices it.
 void test_school_separation_pushes_away_from_body() {
-  Fish all[2] = {fish(Layer::Near, {100, 120}, true, {20, 0}), fish(Layer::Near, {178, 126}, true)};
+  const float tailToHead = (tank::kGlyphLen[2] - 1) * tank::charAdvance(Layer::Near);
+  Fish all[2] = {fish(Layer::Near, {100, 120}, true, {20, 0}), fish(Layer::Near, {106 + tailToHead, 126}, true)};
+  TEST_ASSERT_TRUE(std::hypot(all[1].pos.x - 100.f, 6.f) > Tuning{}.neighborRadius);
   const Vec2 r = tank::steerSchool(all[0], all, 2, Tuning{}, kFx);
   TEST_ASSERT_TRUE(r.x < 0.f);
   TEST_ASSERT_TRUE(r.y < 0.f);
@@ -84,7 +86,7 @@ void test_school_cohesion_pulls_toward_center() {
   Tuning t;
   t.alignmentWeight = 0.f;
   t.separationWeight = 0.f;
-  Fish all[2] = {fish(Layer::Mid, {100, 120}, true), fish(Layer::Mid, {140, 120}, true)};
+  Fish all[2] = {fish(Layer::Mid, {100, 120}, true), fish(Layer::Mid, {125, 120}, true)};  // within range
   const Vec2 r = tank::steerSchool(all[0], all, 2, t, kFx);
   TEST_ASSERT_TRUE(r.x > 0.f);
 }

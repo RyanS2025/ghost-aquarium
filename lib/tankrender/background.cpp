@@ -31,7 +31,7 @@ void buildBackground(uint16_t* out, const FxTuning& fx) {
     }
     for (int x = 0; x < W; ++x) {
       const float edge = std::min({static_cast<float>(x), static_cast<float>(W - 1 - x), y - kSurfaceY, static_cast<float>(H - 1 - y)});
-      const float fade = y < kSurfaceY ? 0.f : smoothstep(0.f, 38.f, edge);
+      const float fade = y < kSurfaceY ? 0.f : smoothstep(0.f, kEdgeFade, edge);
       const float center = 1.f - 0.35f * std::hypot((x - W / 2.f) / (W / 2.f), (y - H * 0.45f) / (H / 2.f));
       const float m = k * fade * std::min(1.f, std::max(0.f, center)) * (1.15f - 0.45f * u);
       const float d = kBayer4[(y & 3) * 4 + (x & 3)] / 16.f - 0.5f;
