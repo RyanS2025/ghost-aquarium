@@ -9,6 +9,7 @@
 #include "background.h"
 #include "color.h"
 #include "glyphs.h"
+#include "palette.h"
 #include "renderer.h"
 #include "seabed.h"
 #include "tank.h"
@@ -238,8 +239,65 @@ void test_render_demo_frames() {
   }
 }
 
+// Banded rendering (ADR 0008 §7): the display list is built once per frame, then rasterised
+// into 40-row bands that DMA can send while the next band is drawn. Stitched bands must be
+// byte-identical to the full-frame render, in both the live and the baked-backdrop modes.
+namespace {
+void expectBandsEqualFullFrame(uint32_t flags) {
+  auto bg = background();
+  tank::Tank tk(kT, kFx, 21);
+  for (int i = 0; i < 300; ++i) tk.step(1.f / 60.f);
+  std::vector<uint16_t> source = bg;
+  if (flags & tank::render::kBackdropHasRaysAndScenery) {
+    tank::render::bakeStaticScenery(tk, bg.data());
+    for (int b = 0; b < tank::render::kRayBands; ++b) tank::render::refreshBackdrop(tk, bg.data(), source.data(), b);
+  }
+  std::vector<uint16_t> full(W * H);
+  Frame ff{full.data(), W, H};
+  tank::render::renderFrame(tk, source.data(), ff, flags);
+
+  static tank::render::DisplayList list;
+  tank::render::buildDisplayList(tk, list, flags);
+  constexpr int kBandH = 40;
+  std::vector<uint16_t> stitched(W * H), band(W * kBandH);
+  for (int b = 0; b < H / kBandH; ++b) {
+    Frame fb{band.data(), W, kBandH};
+    fb.originY = b * kBandH;
+    tank::render::rasterize(tk, list, source.data(), fb, flags);
+    std::memcpy(stitched.data() + b * kBandH * W, band.data(), band.size() * sizeof(uint16_t));
+  }
+  TEST_ASSERT_EQUAL_MEMORY(full.data(), stitched.data(), full.size() * sizeof(uint16_t));
+}
+}  // namespace
+
+void test_banded_render_equals_full_frame_live() { expectBandsEqualFullFrame(tank::render::kLive); }
+void test_banded_render_equals_full_frame_baked() { expectBandsEqualFullFrame(tank::render::kBackdropHasRaysAndScenery); }
+
+// DMA sends the band as-is, so it must already be in the panel's byte order.
+void test_swap_bytes_in_place() {
+  uint16_t px[3] = {0xF800, 0x1234, 0x00FF};
+  tank::render::swapBytes(px, 3);
+  TEST_ASSERT_EQUAL_HEX16(0x00F8, px[0]);
+  TEST_ASSERT_EQUAL_HEX16(0x3412, px[1]);
+  TEST_ASSERT_EQUAL_HEX16(0xFF00, px[2]);
+}
+
+void test_display_list_fits_a_busy_frame() {
+  tank::Tank tk(kT, kFx, 7);
+  static tank::render::DisplayList list;
+  for (int i = 0; i < 20; ++i) tk.splash(40.f + 12.f * i, 200.f, tank::kWhite);  // particle pool full
+  tk.step(1.f / 60.f);
+  tank::render::buildDisplayList(tk, list, tank::render::kLive);
+  TEST_ASSERT_EQUAL_UINT32(0, list.dropped);
+  TEST_ASSERT_TRUE(list.n < tank::render::kMaxOps);
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_banded_render_equals_full_frame_live);
+  RUN_TEST(test_banded_render_equals_full_frame_baked);
+  RUN_TEST(test_swap_bytes_in_place);
+  RUN_TEST(test_display_list_fits_a_busy_frame);
   RUN_TEST(test_render_demo_frames);
   RUN_TEST(test_baked_backdrop_matches_live_render_above_seabed);
   RUN_TEST(test_refresh_backdrop_touches_only_its_band);

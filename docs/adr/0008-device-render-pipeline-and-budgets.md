@@ -70,3 +70,15 @@ Per-stage times from the firmware's `stages_us` log line, in Wokwi time. The sim
 | Water surface in one pass (angle-addition recurrence, per-ripple constants, 120 px ripple reach) and an integer glint hash | **70 ms** | fish 17.5 ms |
 
 With the ≈4.8× calibration that's about 15 ms render + 31 ms push, so **≈22 fps** while rendering and pushing run one after the other. The push is now twice the render time, so the next step toward 30 fps is overlapping them (§7: DMA with banding or a second buffer), not more CPU work. Confirm on hardware first.
+
+### Banded DMA (implemented 2026-11-14)
+
+Each frame, `buildDisplayList` computes every glyph's position and color **once** (≈300–450 ops, about 8 KB). `rasterize` then draws the list into **6 bands of 40 rows** using two 25 KB DMA-capable SRAM buffers. Each band is byte-swapped to panel order and sent with `pushImageDMA` while the CPU draws the next one. The code waits for the previous transfer only right before reusing its buffer. Stitched bands are byte-identical to the full-frame render (tested in both the live and backdrop modes). `-DGHOST_BANDED=0` restores the full-frame path.
+
+| | Full frame | DMA bands |
+|---|---|---|
+| Wokwi fps | 4.1 | **4.8** |
+| Free heap after boot | 172 KB | **260 KB** (no 150 KB framebuffer, which leaves room for WiFi in v2) |
+| Estimated real hardware (÷4.8) | ≈22 fps | **≈25 fps**: about 8 ms build, then rasterizing hidden inside the ≈31 ms push |
+
+The path to 30 fps is now the SPI clock (try 80 MHz on the real module) or overlapping the list build with the previous frame's last band. Measure on hardware first (Phase 1).
